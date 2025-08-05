@@ -1,0 +1,1989 @@
+import streamlit as st
+import sqlite3
+import os
+import uuid
+import datetime
+
+import json
+import base64
+import pytz
+
+# ===================== CONFIG & CONSTANTS =====================
+DB_PATH = "portfolio.db"
+UPLOADS_DIR = "uploads"
+CATEGORIES = [
+    "Bridal", "Editorial", "Fashion", "Natural", "Glam", "Special Effects",
+    "Daily", "Basics", "Dating", "Work", "Special Events", "Weddings", "Prom", "Face Disguise", "Others"
+]
+ACCENT_COLOR = "#f9f9a1"
+PRIMARY_COLOR = "#222"
+SECONDARY_COLOR = "#888"
+REGIONS = ["Americas", "Europe", "Asia", "Australia"]
+TIME_BLOCKS = [
+    "02:00–04:00", "04:00–06:00", "06:00–08:00", "08:00–10:00",
+    "10:00–12:00", "12:00–14:00", "14:00–16:00", "16:00–18:00",
+    "18:00–20:00", "20:00–22:00", "22:00–24:00"
+]
+CURRENCIES = ["USD", "EUR", "VND", "JPY", "GBP", "AUD", "CAD", "SGD", "KRW", "CNY"]
+
+
+# ===================== DATABASE FUNCTIONS =====================
+
+# --- General DB Save/Load for User Data ---
+def save_to_db(table, user_id, data):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(f"CREATE TABLE IF NOT EXISTS {table} (user_id TEXT PRIMARY KEY, data TEXT)")
+    c.execute(f"INSERT OR REPLACE INTO {table} (user_id, data) VALUES (?, ?)", (user_id, json.dumps(data)))
+    conn.commit()
+    conn.close()
+
+def load_from_db(table, user_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(f"CREATE TABLE IF NOT EXISTS {table} (user_id TEXT PRIMARY KEY, data TEXT)")
+    c.execute(f"SELECT data FROM {table} WHERE user_id=?", (user_id,))
+    row = c.fetchone()
+    conn.close()
+    return json.loads(row[0]) if row and row[0] else ([] if table == "services" else {})
+
+# --- Booking Status (Availability Toggle) ---
+def save_booking_status(user_id, is_available):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        INSERT OR REPLACE INTO booking_status (user_id, is_available)
+        VALUES (?, ?)
+    """, (user_id, int(is_available)))
+    conn.commit()
+    conn.close()
+
+def load_booking_status(user_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        SELECT is_available FROM booking_status WHERE user_id=?
+    """, (user_id,))
+    row = c.fetchone()
+    conn.close()
+    if row is not None:
+        return bool(row[0])
+    else:
+        return False  # Default: not available
+
+# --- Services & Availability ---
+def load_services(user_id):
+    return load_from_db("services", user_id)
+
+def load_availability(user_id):
+    return load_from_db("availability", user_id)
+
+def remove_service(user_id, idx):
+    services = st.session_state.get("services", [])
+    if 0 <= idx < len(services):
+        services.pop(idx)
+    st.session_state["services"] = services
+
+def get_services(user_id):
+    return load_from_db("services", user_id)
+
+def get_availability(user_id):
+    return load_from_db("availability", user_id)
+
+def save_availability(user_id, availability):
+    st.session_state["availability"] = availability
+
+# --- Bookings ---
+def save_booking_to_db(user_id, booking):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""CREATE TABLE IF NOT EXISTS bookings (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, data TEXT)""")
+    c.execute("INSERT INTO bookings (user_id, data) VALUES (?, ?)", (user_id, json.dumps(booking)))
+    conn.commit()
+    conn.close()
+
+def load_bookings_from_db(user_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT id, data FROM bookings WHERE user_id=?", (user_id,))
+    rows = c.fetchall()
+    conn.close()
+    bookings = []
+    for row in rows:
+        booking_data = json.loads(row[1])
+        booking_data['id'] = row[0]  # Attach the DB id to the booking dict
+        bookings.append(booking_data)
+    return bookings
+
+
+# --- Projects ---
+def add_project_to_db(project, is_public=True):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    categories = project["categories"]
+    if isinstance(categories, list):
+        categories = json.dumps(categories)
+    c.execute("""
+        INSERT INTO projects (
+            type, header, designer, categories, hashtag, designer_social, comment,
+            image1_path, image2_path, video_path, created_at, public
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        project["type"],
+        project["header"],
+        project["designer"],
+        categories,
+        project["hashtag"],
+        project["designer_social"],
+        project["comment"],
+        project.get("image1_path"),
+        project.get("image2_path"),
+        project.get("video_path"),
+        datetime.now().isoformat(),
+        1 if is_public else 0
+    ))
+    conn.commit()
+    conn.close()
+
+def set_project_public(project_id, is_public):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE projects SET public=? WHERE id=?", (1 if is_public else 0, project_id))
+    conn.commit()
+    conn.close()
+
+def delete_project(project_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("DELETE FROM projects WHERE id=?", (project_id,))
+    conn.commit()
+    conn.close()
+
+def load_projects_from_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT * FROM projects ORDER BY created_at DESC")
+    projects = c.fetchall()
+    conn.close()
+    return projects
+
+def load_public_projects_by_type():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT * FROM projects WHERE public=1 ORDER BY created_at DESC")
+    projects = c.fetchall()
+    conn.close()
+    face_sketch, regular, ai, videos = [], [], [], []
+    for proj in projects:
+        if proj[1] == 'sketch':
+            face_sketch.append(proj)
+        elif proj[1] == 'regular':
+            regular.append(proj)
+        elif proj[1] == 'ai':
+            ai.append(proj)
+        elif proj[1] == 'video':
+            videos.append(proj)
+    return face_sketch, regular, ai, videos
+
+def get_project_categories(proj):
+    cats = proj[4]  # categories column
+    try:
+        cats = json.loads(cats)
+    except Exception:
+        cats = cats.split(",")
+    return ", ".join([c.strip() for c in cats if c.strip()])
+
+# --- Memos ---
+def add_memo_db(content):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("INSERT INTO memos (content) VALUES (?)", (content,))
+    conn.commit()
+    conn.close()
+
+def get_memos_db(limit=10):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT * FROM memos ORDER BY created_at DESC LIMIT ?", (limit,))
+    memos = c.fetchall()
+    conn.close()
+    return memos
+
+def delete_memo_db(memo_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("DELETE FROM memos WHERE id=?", (memo_id,))
+    conn.commit()
+    conn.close()
+
+# --- Profile ---
+def update_profile(about, about_public, social_links, social_public):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''
+        UPDATE profile
+        SET about=?, about_public=?, social_links=?, social_public=?
+        WHERE id=1
+    ''', (about, about_public, social_links, social_public))
+    conn.commit()
+    conn.close()
+
+def get_profile():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT * FROM profile WHERE id=1")
+    row = c.fetchone()
+    conn.close()
+    return row
+
+# --- Miscellaneous User Data (Session State Only) ---
+def get_pending_requests(user_id):
+    return st.session_state.get("pending_requests", [])
+
+def update_request_status(user_id, request_id, status):
+    pass
+
+def get_feedback(user_id):
+    return st.session_state.get("feedback", [])
+
+def get_analytics(user_id):
+    return st.session_state.get("analytics", {})
+
+def save_reminder_settings(user_id, settings):
+    st.session_state["reminder_settings"] = settings
+
+def get_reminder_settings(user_id):
+    return st.session_state.get("reminder_settings", {"importance": "Moderate", "advance_time": 24})
+
+def get_buffer_time(user_id):
+    return st.session_state.get("buffer_time", 0)
+
+def set_buffer_time(user_id, buffer):
+    st.session_state["buffer_time"] = buffer
+
+def get_service_duration(user_id, idx):
+    services = get_services(user_id)
+    if 0 <= idx < len(services):
+        return services[idx].get("duration", 60)
+    return 60
+
+def set_service_duration(user_id, idx, duration):
+    services = get_services(user_id)
+    if 0 <= idx < len(services):
+        services[idx]["duration"] = duration
+    st.session_state["services"] = services
+
+def get_special_dates(user_id):
+    return st.session_state.get("special_dates", [])
+
+def set_special_dates(user_id, dates):
+    st.session_state["special_dates"] = dates
+
+def get_calendar_sync(user_id):
+    return st.session_state.get("calendar_sync", {"google": False, "apple": False})
+
+def set_calendar_sync(user_id, sync_settings):
+    st.session_state["calendar_sync"] = sync_settings
+
+# --- File Save Helper ---
+def save_uploaded_file(uploadedfile):
+    if not uploadedfile:
+        return None
+    if not os.path.exists(UPLOADS_DIR):
+        os.makedirs(UPLOADS_DIR)
+    ext = os.path.splitext(uploadedfile.name)[1]
+    unique_name = f"{uuid.uuid4().hex}{ext}"
+    filepath = os.path.join(UPLOADS_DIR, unique_name)
+    with open(filepath, "wb") as f:
+        f.write(uploadedfile.getbuffer())
+    return filepath
+
+# --- Image Preview Helper ---
+def rectangle_frame_html(img_bytes, x_offset=0, y_offset=0):
+    if img_bytes is None:
+        return ""
+    img_bytes.seek(0)
+    img_b64 = base64.b64encode(img_bytes.read()).decode()
+    return f"""
+    <div style='width:160px; height:130px; position:relative; margin:auto;'>
+      <div style="position:absolute;top:0;left:0;width:160px;height:130px;
+                  border:4px solid #e0e0e0; border-radius:14px; background:#fff;">
+      </div>
+      <img src="data:image/png;base64,{img_b64}" style="
+        position:absolute;
+        left:calc(50% + {x_offset}px - 60px);
+        top:calc(50% + {y_offset}px - 60px);
+        width:120px; height:120px; object-fit:contain;"/>
+    </div>
+    """
+
+def image_to_base64(path):
+    if not path or not os.path.exists(path):
+        return ""
+    with open(path, "rb") as img:
+        return base64.b64encode(img.read()).decode()
+
+# --- Database Schema Initialization & Migration ---
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    # Booking status (toggle)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS booking_status (
+            user_id TEXT PRIMARY KEY,
+            is_available INTEGER
+        )
+    """)
+    # Projects (portfolio)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT,
+            header TEXT,
+            designer TEXT,
+            categories TEXT,
+            hashtag TEXT,
+            designer_social TEXT,
+            comment TEXT,
+            image1_path TEXT,
+            image2_path TEXT,
+            video_path TEXT,
+            created_at TEXT,
+            public INTEGER DEFAULT 0
+        )
+    """)
+    # Memos (notes)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS memos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            content TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    # Profile (about/social)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS profile (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            about TEXT,
+            about_public INTEGER,
+            social_links TEXT,
+            social_public INTEGER
+        )
+    """)
+    # Ensure a default profile row exists
+    c.execute('''
+        INSERT OR IGNORE INTO profile (id, about, about_public, social_links, social_public)
+        VALUES (1, "", 1, "", 1)
+    ''')
+    # Services (list of services per user)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS services (
+            user_id TEXT PRIMARY KEY,
+            data TEXT
+        )
+    """)
+    # Availability (booking hours/time blocks per user)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS availability (
+            user_id TEXT PRIMARY KEY,
+            data TEXT
+        )
+    """)
+    # Bookings (actual bookings made)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS bookings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            data TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+def booking_widget(services, availability, user_id):
+    if not services:
+        st.info("No services available.")
+        return
+
+    # Service selection
+    service_idx = st.selectbox(
+        "Choose a service",
+        range(len(services)),
+        format_func=lambda i: services[i]['name'],
+        key="select_service"
+    )
+    selected_service = services[service_idx]
+
+    # Build selectable dates and blocks (same as your logic)
+    mode = availability.get("mode", "same")
+    off_days = set(availability.get("off_days", []))
+    today = datetime.date.today()
+    days_ahead = 30
+    all_dates = [today + datetime.timedelta(days=i) for i in range(days_ahead)]
+    selectable_dates, date_to_blocks = [], {}
+
+    if mode == "same":
+        for d in all_dates:
+            if d.strftime("%A") not in off_days:
+                selectable_dates.append(d)
+                date_to_blocks[d] = list(availability.get("blocks", []))
+    elif mode == "custom":
+        for d, blocks in availability.get("dates", []):
+            date_obj = datetime.date.fromisoformat(d)
+            selectable_dates.append(date_obj)
+            date_to_blocks[date_obj] = blocks
+    elif mode == "contact":
+        st.info("Please contact directly to book.")
+        return
+
+    if not selectable_dates:
+        st.warning("No available dates.")
+        return
+
+    date = st.date_input(
+        "Choose date",
+        value=selectable_dates[0],
+        min_value=selectable_dates[0],
+        max_value=selectable_dates[-1],
+        key="booking_date"
+    )
+
+    all_bookings = load_bookings_from_db(user_id)
+    booked_slots = [
+        b["time"] for b in all_bookings
+        if b["date"] == str(date) and b.get("status") == "confirmed"
+    ]
+    available_blocks = [block for block in date_to_blocks.get(date, []) if block not in booked_slots]
+    if not available_blocks:
+        st.warning("No available time slots for this date.")
+        return
+
+    time = st.selectbox("Select time slot", available_blocks, key="booking_time")
+
+    # Client info fields
+    name = st.text_input("Your Name", key="client_name")
+    email = st.text_input("Your Email", key="client_email")
+    phone = st.text_input("Phone (optional)", key="client_phone")
+
+    if st.button("Confirm Booking", key="confirm_booking"):
+        if not name or not email:
+            st.warning("Name and Email required.")
+        else:
+            booking = {
+                "client_name": name,
+                "client_email": email,
+                "client_phone": phone,
+                "service": selected_service["name"],
+                "date": str(date),
+                "time": time,
+                "status": "confirmed"
+            }
+            save_booking_to_db(user_id, booking)
+            st.success(f"Booking confirmed for {name} on {date} at {time}.")
+            st.rerun()
+
+    # Client info fields
+    name = st.text_input("Your Name", key="client_name")
+    email = st.text_input("Your Email", key="client_email")
+    phone = st.text_input("Phone (optional)", key="client_phone")
+
+    if st.button("Confirm Booking", key="confirm_booking"):
+        if not name or not email:
+            st.warning("Name and Email required.")
+        else:
+            booking = {
+                "client_name": name,
+                "client_email": email,
+                "client_phone": phone,
+                "service": selected_service["name"],
+                "date": str(date),
+                "time": time,
+                "status": "confirmed"
+            }
+            save_booking_to_db(user_id, booking)
+            st.success(f"Booking confirmed for {name} on {date} at {time}.")
+
+def booking_widget(services, availability, user_id):
+    # ... (existing booking form logic)
+    if st.button("Confirm Booking", key="confirm_booking"):
+        if not name or not email:
+            st.warning("Name and Email required.")
+        else:
+            booking = {
+                "client_name": name,
+                "client_email": email,
+                "client_phone": phone,
+                "service": selected_service["name"],
+                "date": str(date),
+                "time": time,
+                "status": "confirmed"
+            }
+            save_booking_to_db(user_id, booking)
+            st.success(f"Booking confirmed for {name} on {date} at {time}.")
+            # Optionally, set a flag or clear the widget
+
+
+def booking_widget(services, availability, user_id):
+    if not services:
+        st.info("No services available.")
+        return
+
+    # Service selection
+    service_idx = st.selectbox(
+        "Choose a service",
+        range(len(services)),
+        format_func=lambda i: services[i]['name'],
+        key="select_service"
+    )
+    selected_service = services[service_idx]
+
+    # Booking mode and available dates/blocks
+    mode = availability.get("mode", "same")
+    off_days = set(availability.get("off_days", []))
+    today = datetime.date.today()
+    days_ahead = 30
+    all_dates = [today + datetime.timedelta(days=i) for i in range(days_ahead)]
+    selectable_dates = []
+    date_to_blocks = {}
+
+    if mode == "same":
+        for d in all_dates:
+            if d.strftime("%A") not in off_days:
+                selectable_dates.append(d)
+                date_to_blocks[d] = list(availability.get("blocks", []))
+    elif mode == "custom":
+        for d, blocks in availability.get("dates", []):
+            date_obj = datetime.date.fromisoformat(d)
+            selectable_dates.append(date_obj)
+            date_to_blocks[date_obj] = blocks
+    elif mode == "contact":
+        st.info("Please contact directly to book.")
+        return
+
+    if not selectable_dates:
+        st.warning("No available dates.")
+        return
+
+    # --- Calendar (Date Picker) ---
+    date = st.date_input(
+        "Choose date",
+        value=selectable_dates[0],
+        min_value=selectable_dates[0],
+        max_value=selectable_dates[-1],
+        key="booking_date"
+    )
+    if date not in selectable_dates:
+        st.warning("Selected date not available.")
+        return
+
+    # --- Time Slot Picker ---
+    blocks = date_to_blocks.get(date, [])
+    if not blocks:
+        st.warning("No time blocks for this date.")
+        return
+
+    time = st.selectbox("Select time slot", blocks, key="booking_time")
+
+    # --- Client Info ---
+    name = st.text_input("Your Name", key="client_name")
+    email = st.text_input("Your Email", key="client_email")
+    phone = st.text_input("Phone (optional)", key="client_phone")
+
+    # --- Confirm Booking ---
+    if st.button("Confirm Booking", key="confirm_booking"):
+        if not name or not email:
+            st.warning("Name and Email required.")
+        else:
+            booking = {
+                "client_name": name,
+                "client_email": email,
+                "client_phone": phone,
+                "service": selected_service["name"],
+                "date": str(date),
+                "time": time,
+                "status": "confirmed"
+            }
+            save_booking_to_db(user_id, booking)
+            st.success(f"Booking confirmed for {name} on {date} at {time}.")
+
+
+def booking_widget(services, availability, user_id):
+    if not services:
+        st.info("No services available.")
+        return
+
+    # Service selection
+    service_idx = st.selectbox(
+        "Choose a service",
+        range(len(services)),
+        format_func=lambda i: services[i]['name'],
+        key="select_service"
+    )
+    selected_service = services[service_idx]
+
+    # Booking mode and available dates/blocks
+    mode = availability.get("mode", "same")
+    off_days = set(availability.get("off_days", []))
+    today = datetime.date.today()
+    days_ahead = 30
+    all_dates = [today + datetime.timedelta(days=i) for i in range(days_ahead)]
+    selectable_dates = []
+    date_to_blocks = {}
+
+    if mode == "same":
+        for d in all_dates:
+            if d.strftime("%A") not in off_days:
+                selectable_dates.append(d)
+                date_to_blocks[d] = list(availability.get("blocks", []))
+    elif mode == "custom":
+        for d, blocks in availability.get("dates", []):
+            date_obj = datetime.date.fromisoformat(d)
+            selectable_dates.append(date_obj)
+            date_to_blocks[date_obj] = blocks
+    elif mode == "contact":
+        st.info("Please contact directly to book.")
+        return
+
+    if not selectable_dates:
+        st.warning("No available dates.")
+        return
+
+    date = st.date_input(
+        "Choose date",
+        value=selectable_dates[0],
+        min_value=selectable_dates[0],
+        max_value=selectable_dates[-1],
+        key="booking_date"
+    )
+    if date not in selectable_dates:
+        st.warning("Selected date not available.")
+        return
+
+    blocks = date_to_blocks.get(date, [])
+    if not blocks:
+        st.warning("No time blocks for this date.")
+        return
+
+    time = st.selectbox("Select time slot", blocks, key="booking_time")
+
+    # --- Now define the input fields: ---
+    name = st.text_input("Your Name", key="client_name")
+    email = st.text_input("Your Email", key="client_email")
+    phone = st.text_input("Phone (optional)", key="client_phone")
+
+    if st.button("Confirm Booking", key="confirm_booking"):
+        if not name or not email:
+            st.warning("Name and Email required.")
+        else:
+            booking = {
+                "client_name": name,
+                "client_email": email,
+                "client_phone": phone,
+                "service": selected_service["name"],
+                "date": str(date),
+                "time": time,
+                "status": "confirmed"
+            }
+            save_booking_to_db(user_id, booking)
+            st.success(f"Booking confirmed for {name} on {date} at {time}.")
+
+
+def delete_booking_from_db(user_id, booking):
+    """
+    Delete a booking from the bookings table.
+    booking: a dict with at least the 'date', 'time', and 'service' fields, or an 'id' field if available.
+    """
+    import sqlite3
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # If your booking dict includes an 'id', use it (recommended):
+    if 'id' in booking:
+        c.execute("DELETE FROM bookings WHERE id=? AND user_id=?", (booking['id'], user_id))
+    else:
+        # Otherwise, match by user_id, date, time, and service (less robust, but works if id is missing)
+        c.execute(
+            "DELETE FROM bookings WHERE user_id=? AND data LIKE ? AND data LIKE ? AND data LIKE ?",
+            (user_id, f'%{booking["date"]}%', f'%{booking["time"]}%', f'%{booking["service"]}%')
+        )
+
+    conn.commit()
+    conn.close()
+
+def delete_booking_from_db(user_id, booking_id):
+    import sqlite3
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("DELETE FROM bookings WHERE id=? AND user_id=?", (booking_id, user_id))
+    conn.commit()
+    conn.close()
+
+def load_visited_status_from_db(user_id):
+    import sqlite3
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT booking_id, visited FROM visited_status WHERE user_id=?", (user_id,))
+    rows = c.fetchall()
+    conn.close()
+    # Returns a dictionary: {booking_id: "Yes"/"No"}
+    return {row[0]: row[1] for row in rows}
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS visited_status (
+            user_id TEXT,
+            booking_id INTEGER,
+            visited TEXT,
+            PRIMARY KEY (user_id, booking_id)
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def save_visited_status_to_db(user_id, booking_id, visited):
+    import sqlite3
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS visited_status (
+            user_id TEXT,
+            booking_id INTEGER,
+            visited TEXT,
+            PRIMARY KEY (user_id, booking_id)
+        )
+    """)
+    c.execute(
+        "INSERT OR REPLACE INTO visited_status (user_id, booking_id, visited) VALUES (?, ?, ?)",
+        (user_id, booking_id, visited)
+    )
+    conn.commit()
+    conn.close()
+
+
+def migrate_add_public_column():
+    import sqlite3
+    DB_PATH = "portfolio.db"  # Make sure this matches your DB_PATH variable
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    try:
+        c.execute("ALTER TABLE projects ADD COLUMN public INTEGER DEFAULT 0")
+        conn.commit()
+    except sqlite3.OperationalError:
+        # This error is raised if the column already exists; safe to ignore
+        pass
+    conn.close()
+
+def save_message_to_db(message):
+    import sqlite3
+    DB_PATH = "portfolio.db"  # Update with your DB path
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sender TEXT,
+            email TEXT,
+            content TEXT,
+            time TEXT,
+            recipient TEXT
+        )
+    """)
+    c.execute("""
+        INSERT INTO messages (sender, email, content, time, recipient)
+        VALUES (?, ?, ?, ?, ?)
+    """, (message["from"], message["email"], message["content"], str(message["time"]), message["to"]))
+    conn.commit()
+    conn.close()
+def load_messages_from_db(user_id):
+    import sqlite3
+    DB_PATH = "portfolio.db"
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT sender, email, content, time, recipient FROM messages ORDER BY time ASC")
+    rows = c.fetchall()
+    conn.close()
+    return [
+        {
+            "from": row[0],
+            "email": row[1],
+            "content": row[2],
+            "time": row[3],
+            "to": row[4]
+        }
+        for row in rows
+    ]
+
+def save_message_to_db(user_id):
+    import sqlite3
+    DB_PATH = "portfolio.db"
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sender TEXT,
+                email TEXT,
+                content TEXT,
+                time TEXT,
+                recipient TEXT
+            )
+        """)
+        c.execute("""
+            INSERT INTO messages (sender, email, content, time, recipient)
+            VALUES (?, ?, ?, ?, ?)
+        """, (message["from"], message["email"], message["content"], str(message["time"]), message["to"]))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print("Error saving message to DB:", e)
+
+
+# ===================== SESSION STATE INIT =====================
+session_defaults = {
+    "fullscreen_portfolio_idx": None,
+    "fullscreen_portfolio_type": None,
+    "sketch_swipe_state": {},
+    "show_public_profile": False,
+    "roles": [],
+    "editing_role": False,
+    "face_sketch_pairs": [],
+    "regular_images": [],
+    "ai_images": [],
+    "video_files": [],
+    "memos": [],
+    "memo_expanded": {},
+    #"services": [],
+    "notifications": [
+        "New booking request from Alex (July 10, 2pm)",
+        "Feedback received: 'Loved the look!'",
+        "Collaboration invite from Face Designer Mia",
+        "Booking confirmed for July 12, 4pm"
+    ],
+    "artist_name": "Jane Doe",
+    "editing_name": False,
+    #"availability": {},
+    "pending_requests": [],
+    "feedback": [],
+    "analytics": {},
+    "reminder_settings": {"importance": "Moderate", "advance_time": 24},
+    "buffer_time": 0,
+    "special_dates": [],
+    "calendar_sync": {"google": False, "apple": False},
+    "booking_history": [],
+    #"messages": [],
+}
+for key, default in session_defaults.items():
+    if key not in st.session_state:
+        st.session_state[key] = default
+
+# ===================== APP INIT =====================
+
+init_db()
+user_id = st.session_state.get("user_id", "demo_user")
+migrate_add_public_column()
+
+# ===================== APP INIT =====================
+if "notifications" not in st.session_state:
+    st.session_state["notifications"] = load_notifications_from_db(user_id)
+
+if "messages" not in st.session_state:
+    st.session_state["messages"] = load_messages_from_db(user_id)
+messages = st.session_state["messages"]
+
+# --- Load User Data from DB into Session State ---
+if "availability" not in st.session_state:
+    st.session_state["availability"] = load_availability(user_id)
+availability = st.session_state["availability"]
+
+if "services" not in st.session_state:
+    st.session_state["services"] = load_services(user_id)
+services = st.session_state["services"]
+
+#if "is_available" not in st.session_state:
+#    st.session_state["is_available"] = load_booking_status(user_id)
+
+# --- Initialize Other Session State Defaults ---
+if "special_dates" not in st.session_state:
+    st.session_state["special_dates"] = []
+if "buffer_time" not in st.session_state:
+    st.session_state["buffer_time"] = 0
+if "pending_requests" not in st.session_state:
+    st.session_state["pending_requests"] = []
+if "feedback" not in st.session_state:
+    st.session_state["feedback"] = []
+if "analytics" not in st.session_state:
+    st.session_state["analytics"] = {}
+if "preview_face_pairs" not in st.session_state:
+    st.session_state["preview_face_pairs"] = []
+if "preview_regular" not in st.session_state:
+    st.session_state["preview_regular"] = []
+if "preview_ai" not in st.session_state:
+    st.session_state["preview_ai"] = []
+if "preview_videos" not in st.session_state:
+    st.session_state["preview_videos"] = []
+
+
+# --- Save to DB (ensure latest data is persisted) ---
+save_to_db("services", user_id, st.session_state["services"])
+save_to_db("availability", user_id, st.session_state["availability"])
+
+
+# ===================== SIDEBAR: PROFILE, ROLES, NOTIFICATIONS, NAVIGATION =====================
+
+# --- Profile Image Upload ---
+profile_img = st.sidebar.file_uploader("Upload profile image", type=["png", "jpg", "jpeg"], key="profile_img")
+if profile_img:
+    st.sidebar.image(profile_img, width=120)
+else:
+    st.sidebar.image("makeup_artist_card.png", width=120)
+
+# --- Artist Name Editing ---
+if st.sidebar.button("Change Name", key="sidebar_change_name"):
+    st.session_state["editing_name"] = True
+if st.session_state["editing_name"]:
+    new_name = st.sidebar.text_input("Enter your name", value=st.session_state["artist_name"], key="sidebar_name_input")
+    if st.sidebar.button("Save Name", key="sidebar_save_name"):
+        st.session_state["artist_name"] = new_name
+        st.session_state["editing_name"] = False
+else:
+    st.sidebar.markdown(f"**{st.session_state['artist_name']}**")
+st.sidebar.markdown("⭐ 4.9 | 120 Reviews | 35K Views")
+
+# --- Role Selection/Editing ---
+st.sidebar.markdown("**I am **", unsafe_allow_html=True)
+if not st.session_state["editing_role"]:
+    if st.session_state["roles"]:
+        st.sidebar.markdown(
+            f"<span style='font-weight:bold;color:#111;font-size:1.05em'>{', '.join(st.session_state['roles'])}</span>",
+            unsafe_allow_html=True
+        )
+    else:
+        st.sidebar.markdown(
+            "<span style='font-weight:bold;color:#888;font-size:1.05em'>No role selected</span>",
+            unsafe_allow_html=True
+        )
+    if st.sidebar.button("Edit Role", key="edit_role_btn"):
+        st.session_state["editing_role"] = True
+else:
+    role_options = ["A Makeup Artist", "A Face Designer", "A Photographer" , "An Explorer"]
+    selected_roles = st.sidebar.multiselect(
+        "Select your roles (choose one or more):",
+        role_options,
+        default=st.session_state["roles"],
+        key="role_multiselect"
+    )
+    col_save, col_cancel = st.sidebar.columns([1, 1])
+    with col_save:
+        if st.button("Save Role", key="save_role_btn"):
+            st.session_state["roles"] = selected_roles
+            st.session_state["editing_role"] = False
+    with col_cancel:
+        if st.button("Cancel", key="cancel_role_btn"):
+            st.session_state["editing_role"] = False
+
+# --- Notifications Count & Navigation ---
+####---- Notification Count
+st.session_state["notifications"].append("New booking confirmed for Jane Doe on 2025-07-06 at 10:00")
+notification_count = len(st.session_state.get("notifications", []))
+booking_count = st.session_state.get("booking_notifications", 0)
+messages_count = len(st.session_state.get("messages", []))
+
+st.sidebar.markdown(
+    f"<b>Bookings</b> <span style='background:#e67e22;color:#fff;border-radius:6px;padding:2px 8px;"
+    f"font-size:0.9em;vertical-align:middle;margin-left:6px;'>{booking_count}</span>",
+    unsafe_allow_html=True
+)
+st.sidebar.markdown(
+    f"<b>Notifications</b> <span style='background:#e74c3c;color:#fff;border-radius:6px;padding:2px 8px;"
+    f"font-size:0.9em;vertical-align:middle;margin-left:6px;'>{notification_count}</span>",
+    unsafe_allow_html=True
+)
+
+st.sidebar.markdown(
+    f"<b>Messages</b> <span style='background:#1abc9c;color:#fff;border-radius:6px;padding:2px 8px;"
+    f"font-size:0.9em;vertical-align:middle;margin-left:6px;'>{messages_count}</span>",
+    unsafe_allow_html=True
+)
+
+
+# --- Sidebar --- 
+
+tab = st.sidebar.radio(
+    "Navigation",
+    [
+        "Dashboard",
+        "Bookings",
+        "Feedback & Ratings",
+        "Collaboration",
+        "Drafts",
+        "Analytics",
+        "Settings",
+        "Messages",
+        "Notifications"
+    ],
+    index=0
+)
+
+if st.sidebar.button("View Public Profile", key="sidebar_public_profile_btn"):
+    st.session_state["show_public_profile"] = True
+
+# ===================== NOTIFICATIONS PAGE =====================
+if tab == "Notifications":
+    st.header("🔔 Notifications")
+    # ... show notifications ...
+    if st.checkbox("Did client visit Notifications?", key="notifications_visited_yes"):
+        st.session_state["notifications"] = []
+
+if tab == "Bookings":
+    st.header("📒 Bookings")
+    # ... show bookings ...
+    if st.checkbox("Did client visit Bookings section?", key="booking_visited_yes"):
+        st.session_state["booking_notifications"] = 0
+    
+
+# ===================== PUBLIC PROFILE MODAL =====================
+# ===================== GLAM PUBLIC PROFILE =====================
+
+
+
+# --- Setup ---
+st.set_page_config(page_title="BeautyBlend Profile", layout="centered")
+
+# --- Load Font + Style ---
+st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&display=swap" rel="stylesheet">
+<style>
+.pill-filter {
+    background: #ffe6ee;
+    border: 1px solid #fbc2d4;
+    border-radius: 16px;
+    padding: 4px 14px;
+    margin: 4px;
+    display: inline-block;
+    cursor: pointer;
+    font-size: 0.85em;
+    color: #d26a8a;
+}
+.pill-filter:hover {
+    background: #fbd6e4;
+}
+.pill-filter.selected {
+    background: #f47a9d;
+    color: white;
+}
+.new-badge {
+    font-size: 0.7em;
+    color: white;
+    background: #ff4fa1;
+    padding: 2px 6px;
+    border-radius: 10px;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+.feature-toggle {
+    font-size: 0.75em;
+    color: #666;
+    margin-top: 6px;
+    cursor: pointer;
+}
+.info-line {
+    font-size: 0.85em;
+    color: #555;
+    margin-top: 6px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# --- Public Profile Logic ---
+if st.session_state.get("show_public_profile", False):
+    all_projects = load_projects_from_db()
+
+    # --- Multi-category filter ---
+    all_categories = set()
+    for p in all_projects:
+        cats = get_project_categories(p)
+        if isinstance(cats, list):
+            all_categories.update(cats)
+        else:
+            all_categories.update([c.strip() for c in cats.split(",")])
+
+    selected_cats = st.session_state.get("selected_portfolio_cats", set())
+    if "reset_filter" in st.session_state:
+        selected_cats = set()
+        st.session_state.pop("reset_filter")
+
+    st.markdown("<div style='margin: 12px 0;'>", unsafe_allow_html=True)
+    col1, col2 = st.columns([6, 1])
+    with col1:
+        for cat in sorted(all_categories):
+            is_selected = cat in selected_cats
+            if st.button(f"{'✓ ' if is_selected else ''}{cat}", key=f"filter_{cat}"):
+                if is_selected:
+                    selected_cats.remove(cat)
+                else:
+                    selected_cats.add(cat)
+                st.session_state["selected_portfolio_cats"] = selected_cats
+    with col2:
+        if st.button("Clear All", key="clear_filters"):
+            st.session_state["reset_filter"] = True
+            st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    def category_match(proj):
+        if not selected_cats:
+            return True
+        cats = get_project_categories(proj)
+        if isinstance(cats, str):
+            cats = [c.strip() for c in cats.split(",")]
+        return any(c in selected_cats for c in cats)
+
+    all_projects = [p for p in all_projects if category_match(p)]
+
+    def is_new_upload(proj):
+        if len(proj) >= 14 and isinstance(proj[13], datetime):
+            return proj[13] > datetime.now() - timedelta(days=7)
+        return False
+
+    def sort_by_timestamp(proj):
+        if len(proj) >= 14 and isinstance(proj[13], datetime):
+            return proj[13]
+        return datetime.datetime.min
+
+    all_projects.sort(key=sort_by_timestamp, reverse=True)
+
+    def toggle_feature(proj_id):
+        featured = st.session_state.get("featured_projects", set())
+        if proj_id in featured:
+            featured.remove(proj_id)
+        else:
+            featured.add(proj_id)
+        st.session_state["featured_projects"] = featured
+
+    count_sketch = sum(1 for p in all_projects if p[1] == "sketch")
+    count_regular = sum(1 for p in all_projects if p[1] == "regular")
+    count_ai = sum(1 for p in all_projects if p[1] == "ai")
+    count_video = sum(1 for p in all_projects if p[1] == "video")
+
+    tab_titles = [
+        f"Face Sketch + Final Look ({count_sketch})",
+        f"Regular Images ({count_regular})",
+        f"AI Images ({count_ai})",
+        f"Videos ({count_video})"
+    ]
+    tabs = st.tabs(tab_titles)
+
+    if st.button("⬅️ Back to Dashboard"):
+        st.session_state["show_public_profile"] = False
+        st.rerun()
+
+    # --- Profile Header ---
+    profile = get_profile()
+    st.markdown("<div class='profile-header'>", unsafe_allow_html=True)
+    col_img, col_info = st.columns([1, 3])
+    with col_img:
+        st.image("makeup_artist_card.png", width=120)
+    with col_info:
+        artist_name = st.session_state.get('artist_name', 'Jane Doe')
+        st.markdown(f"<h2 style='margin-bottom:0.2em'>{artist_name}</h2>", unsafe_allow_html=True)
+        roles = st.session_state.get("roles", [])
+        if roles:
+            st.markdown(f"<div class='profile-roles'>{' · '.join(roles)}</div>", unsafe_allow_html=True)
+        if profile and profile[2]:  # about_public
+            about_text = profile[1] or ""  # about
+            about_text_html = about_text.replace('\n', '<br>')
+            st.markdown(f"<div style='margin-bottom:0.5em'>{about_text_html}</div>", unsafe_allow_html=True)
+        if profile and profile[4]:  # social_public
+            social_links = profile[3].split(",") if profile[3] else []
+            st.markdown("<div class='profile-social'>", unsafe_allow_html=True)
+            for link in social_links:
+                link = link.strip()
+                if link:
+                    st.markdown(f"<a href='{link}' target='_blank'>🔗</a>", unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("**⭐ 4.9 | 120 Reviews | 35K Views**")
+
+    # --- Services & Booking ---
+    services = st.session_state.get("services", [])
+    st.markdown("### Services & Booking")
+    if services:
+        for svc in services[:5]:
+            st.markdown(f"<div class='pill'>{svc['name']}</div>", unsafe_allow_html=True)
+        for svc in services[:3]:
+            st.markdown(f"**{svc['name']}** — {svc['price']} {svc['currency']} / {svc.get('duration','N/A')} min", unsafe_allow_html=True)
+        if len(services) > 5:
+            st.markdown("<span style='color:#888'>See more...</span>", unsafe_allow_html=True)
+
+        # --- Booking Widget Logic ---
+        if "show_booking_widget" not in st.session_state:
+            st.session_state["show_booking_widget"] = False
+
+        if not st.session_state["show_booking_widget"]:
+            if st.button("Book Now", key="public_book_btn"):
+                st.session_state["show_booking_widget"] = True
+
+        if st.session_state["show_booking_widget"]:
+            st.markdown("### 📆 Book a Service (Client View)")
+            booking_widget(services, availability, user_id)
+            if st.button("Cancel Booking", key="cancel_booking_btn"):
+                st.session_state["show_booking_widget"] = False
+
+        # --- View Confirmed Bookings ---
+        st.markdown("### 📋 Confirmed Bookings")
+        confirmed_bookings = load_bookings_from_db(user_id)
+        for idx, b in enumerate(confirmed_bookings):
+            st.markdown(f"- **{b['client_name']}** booked **{b['service']}** on **{b['date']}** at **{b['time']}**")
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                if st.button("Cancel Booking", key=f"cancel_booking_{idx}"):
+                    delete_booking_from_db(user_id, b['id'])
+                    st.success("Booking cancelled.")
+                    st.rerun()
+            with col2:
+                if st.button("Message Artist", key=f"msg_artist_{idx}"):
+                    st.session_state["show_client_msg_popup"] = b['id']
+
+            # --- Client message popup ---
+            if st.session_state.get("show_client_msg_popup") == b['id']:
+                st.markdown("---")
+                st.markdown(f"**Message to Artist**")
+                client_msg_content = st.text_area("Your message to the artist:", key=f"client_msg_content_{b['id']}")
+                send_msg_btn = st.button("Send Message", key=f"send_client_msg_{b['id']}")
+                close_btn = st.button("Close", key=f"close_client_msg_{b['id']}")
+
+                if send_msg_btn:
+                    # Save to messages (client to artist)
+                    msg = {
+                        "from": b["client_name"],
+                        "email": b["client_email"],
+                        "content": client_msg_content,
+                        "time": datetime.datetime.now(),
+                        "to": "artist"
+                    }
+                    save_message_to_db(msg)  # Save to database for persistence
+                    st.session_state["messages"] = load_messages_from_db(user_id)
+		    st.rerun()
+                    # Add notification
+                    
+                    st.session_state["notifications"].append("Client just sent you a message.")
+                    st.session_state["notification_count"] = len(st.session_state["notifications"])
+
+                    st.success("Message sent to artist!")
+                    st.session_state["show_client_msg_popup"] = None
+
+                if close_btn:
+                    st.session_state["show_client_msg_popup"] = None
+    else:
+        st.info("No public services listed.")
+
+
+
+
+
+    # --- Availability Section (icons always shown) ---
+    st.markdown("### Availability")
+    st.markdown("**Contact Options:** 📧 ✉️ 📞")
+    availability = st.session_state.get("availability", {})
+    if availability.get("available"):
+        st.markdown(f"**Region:** {availability.get('region', '')} &nbsp; | &nbsp; **Time Zone:** {availability.get('timezone', '')}")
+        if "mode" in availability:
+            if availability["mode"] == "same":
+                st.markdown(f"**Available blocks:** {', '.join(availability.get('blocks', []))}")
+                if availability.get("off_days"):
+                    st.markdown(f"**Off days:** {', '.join(availability['off_days'])}")
+            elif availability["mode"] == "custom":
+                for date, blocks in availability.get("dates", []):
+                    st.markdown(f"{date.strftime('%A, %b %d, %Y')}: {', '.join(blocks)}")
+            elif availability["mode"] == "contact":
+                st.markdown("_Please contact to book_")
+    else:
+        st.info("Currently not available for booking.")
+
+    # --- Customer Feedback (placeholder) ---
+    st.markdown("<span style='font-size:0.9em; color:#888;'>How people think about me? <a href='#' style='font-size:0.8em;'>(Click to view)</a></span>", unsafe_allow_html=True)
+
+    # --- Portfolio Section ---
+    st.markdown("----")
+    st.markdown("## Portfolio")
+    portfolio_tab = st.tabs(["Face Sketch + Final Look", "Regular Images", "AI Images", "Videos"])
+
+    # --- Face Sketch + Final Look Tab ---
+    with portfolio_tab[0]:
+        sketch_projects = [p for p in load_projects_from_db() if p[1] == "sketch" and (len(p) < 13 or p[12] == 1)]
+        st.markdown("<div class='glassgrid2'>", unsafe_allow_html=True)
+        if not sketch_projects:
+            st.info("No projects yet in this category.")
+        for idx, proj in enumerate(sketch_projects):
+            header = proj[2]
+            sketch_b64 = image_to_base64(proj[8])
+            final_b64 = image_to_base64(proj[9])
+            st.markdown(f"""
+            <div class='glasscard2'>
+                <div style="display: flex; gap: 12px; justify-content: center; align-items: center;">
+                    <img src="data:image/png;base64,{sketch_b64}" style="width:48%; border-radius:12px; object-fit:cover;"/>
+                    <img src="data:image/png;base64,{final_b64}" style="width:48%; border-radius:12px; object-fit:cover;"/>
+                </div>
+                <div class='glassheader2'>{header}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button("View Full", key=f"viewfull_sketch_{idx}"):
+                st.session_state["fullscreen_portfolio_idx"] = idx
+                st.session_state["fullscreen_portfolio_type"] = "sketch"
+        st.markdown("</div>", unsafe_allow_html=True)
+        idx = st.session_state.get("fullscreen_portfolio_idx")
+        typ = st.session_state.get("fullscreen_portfolio_type")
+        if idx is not None and typ == "sketch":
+            proj = sketch_projects[idx]
+            sketch_b64 = image_to_base64(proj[8])
+            final_b64 = image_to_base64(proj[9])
+            close_cols = st.columns([10, 1])
+            with close_cols[1]:
+                if st.button("❌", key="close_full_view_sketch"):
+                    st.session_state["fullscreen_portfolio_idx"] = None
+                    st.session_state["fullscreen_portfolio_type"] = None
+                    st.rerun()
+            st.markdown(f"""
+            <div class="popup-panel" style="min-width:320px;max-width:95vw;">
+                <div style="display: flex; gap: 16px; justify-content: center; align-items: center; width:100%;">
+                    <img src="data:image/png;base64,{sketch_b64}" style="width:48%; border-radius:14px; object-fit:cover;"/>
+                    <img src="data:image/png;base64,{final_b64}" style="width:48%; border-radius:14px; object-fit:cover;"/>
+                </div>
+                <div class="info-box"><b>Header:</b> {proj[2]}</div>
+                <div class="info-box"><b>Categories:</b> {get_project_categories(proj)}</div>
+                <div class="info-box"><b>Hashtag:</b> {proj[5]}</div>
+                <div class="info-box"><b>Designer:</b> {proj[3]}</div>
+                <div class="info-box"><b>Social:</b> {proj[6]}</div>
+                <div class="info-box"><b>Comment:</b> {proj[7]}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # --- Regular Images Tab ---
+    with portfolio_tab[1]:
+        regular_projects = [p for p in load_projects_from_db() if p[1] == "regular" and (len(p) < 13 or p[12] == 1)]
+        st.markdown("<div class='glassgrid2'>", unsafe_allow_html=True)
+        if not regular_projects:
+            st.info("No projects yet in this category.")
+        for idx, proj in enumerate(regular_projects):
+            img_b64 = image_to_base64(proj[8])
+            header = proj[2]
+            st.markdown(f"""
+            <div class='glasscard2'>
+                <img src="data:image/png;base64,{img_b64}" style="width:100%; border-radius:12px; object-fit:cover;"/>
+                <div class='glassheader2'>{header}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button("View Full", key=f"viewfull_regular_{idx}"):
+                st.session_state["fullscreen_portfolio_idx"] = idx
+                st.session_state["fullscreen_portfolio_type"] = "regular"
+        st.markdown("</div>", unsafe_allow_html=True)
+        idx = st.session_state.get("fullscreen_portfolio_idx")
+        typ = st.session_state.get("fullscreen_portfolio_type")
+        if idx is not None and typ == "regular":
+            proj = regular_projects[idx]
+            img_b64 = image_to_base64(proj[8])
+            close_cols = st.columns([10, 1])
+            with close_cols[1]:
+                if st.button("❌", key="close_full_view_regular"):
+                    st.session_state["fullscreen_portfolio_idx"] = None
+                    st.session_state["fullscreen_portfolio_type"] = None
+                    st.rerun()
+            st.markdown(f"""
+            <div class="popup-panel">
+                <img src="data:image/png;base64,{img_b64}" style="width:100%; border-radius:14px; object-fit:cover; margin-bottom:18px;"/>
+                <div class="info-box"><b>Header:</b> {proj[2]}</div>
+                <div class="info-box"><b>Categories:</b> {get_project_categories(proj)}</div>
+                <div class="info-box"><b>Hashtag:</b> {proj[5]}</div>
+                <div class="info-box"><b>Designer:</b> {proj[3]}</div>
+                <div class="info-box"><b>Social:</b> {proj[6]}</div>
+                <div class="info-box"><b>Comment:</b> {proj[7]}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # --- AI Images Tab ---
+    with portfolio_tab[2]:
+        ai_projects = [p for p in load_projects_from_db() if p[1] == "ai" and (len(p) < 13 or p[12] == 1)]
+        st.markdown("<div class='glassgrid2'>", unsafe_allow_html=True)
+        if not ai_projects:
+            st.info("No projects yet in this category.")
+        for idx, proj in enumerate(ai_projects):
+            img_b64 = image_to_base64(proj[8])
+            header = proj[2]
+            st.markdown(f"""
+            <div class='glasscard2'>
+                <img src="data:image/png;base64,{img_b64}" style="width:100%; border-radius:12px; object-fit:cover;"/>
+                <div class='glassheader2'>{header}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button("View Full", key=f"viewfull_ai_{idx}"):
+                st.session_state["fullscreen_portfolio_idx"] = idx
+                st.session_state["fullscreen_portfolio_type"] = "ai"
+        st.markdown("</div>", unsafe_allow_html=True)
+        idx = st.session_state.get("fullscreen_portfolio_idx")
+        typ = st.session_state.get("fullscreen_portfolio_type")
+        if idx is not None and typ == "ai":
+            proj = ai_projects[idx]
+            img_b64 = image_to_base64(proj[8])
+            close_cols = st.columns([10, 1])
+            with close_cols[1]:
+                if st.button("❌", key="close_full_view_ai"):
+                    st.session_state["fullscreen_portfolio_idx"] = None
+                    st.session_state["fullscreen_portfolio_type"] = None
+                    st.rerun()
+            st.markdown(f"""
+            <div class="popup-panel">
+                <img src="data:image/png;base64,{img_b64}" style="width:100%; border-radius:14px; object-fit:cover; margin-bottom:18px;"/>
+                <div class="info-box"><b>Header:</b> {proj[2]}</div>
+                <div class="info-box"><b>Categories:</b> {get_project_categories(proj)}</div>
+                <div class="info-box"><b>Hashtag:</b> {proj[5]}</div>
+                <div class="info-box"><b>Designer:</b> {proj[3]}</div>
+                <div class="info-box"><b>Social:</b> {proj[6]}</div>
+                <div class="info-box"><b>Comment:</b> {proj[7]}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # --- Videos Tab ---
+    with portfolio_tab[3]:
+        video_projects = [p for p in load_projects_from_db() if p[1] == "video" and (len(p) < 13 or p[12] == 1)]
+        st.markdown("<div class='glassgrid2'>", unsafe_allow_html=True)
+        if not video_projects:
+            st.info("No projects yet in this category.")
+        for idx, proj in enumerate(video_projects):
+            header = proj[2]
+            st.markdown(f"<div class='glasscard2'>", unsafe_allow_html=True)
+            if proj[10] and os.path.exists(proj[10]):
+                st.video(proj[10])
+            st.markdown(f"<div class='glassheader2'>{header}</div></div>", unsafe_allow_html=True)
+            if st.button("View Full", key=f"viewfull_video_{idx}"):
+                st.session_state["fullscreen_portfolio_idx"] = idx
+                st.session_state["fullscreen_portfolio_type"] = "video"
+        st.markdown("</div>", unsafe_allow_html=True)
+        idx = st.session_state.get("fullscreen_portfolio_idx")
+        typ = st.session_state.get("fullscreen_portfolio_type")
+        if idx is not None and typ == "video":
+            proj = video_projects[idx]
+            close_cols = st.columns([10, 1])
+            with close_cols[1]:
+                if st.button("❌", key="close_full_view_video"):
+                    st.session_state["fullscreen_portfolio_idx"] = None
+                    st.session_state["fullscreen_portfolio_type"] = None
+                    st.rerun()
+            st.markdown(f"""
+            <div class="popup-panel">
+            """, unsafe_allow_html=True)
+            if proj[10] and os.path.exists(proj[10]):
+                st.video(proj[10])
+            st.markdown(f"""
+                <div class="info-box"><b>Header:</b> {proj[2]}</div>
+                <div class="info-box"><b>Categories:</b> {get_project_categories(proj)}</div>
+                <div class="info-box"><b>Hashtag:</b> {proj[5]}</div>
+                <div class="info-box"><b>Designer:</b> {proj[3]}</div>
+                <div class="info-box"><b>Social:</b> {proj[6]}</div>
+                <div class="info-box"><b>Comment:</b> {proj[7]}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    st.stop()
+
+
+
+
+##### ========== DASHBOARD TAB ========== #####
+if tab == "Dashboard":
+    col_left, col_main = st.columns([1, 3])
+
+    # --- Memo Section (Left Column) ---
+    with col_left:
+        st.markdown("## Memo")
+        memo_input = st.text_area("Add a memo", key="memo_input", placeholder="Type a memo...", height=None)
+        if st.button("Save Memo", key="add_memo_btn"):
+            memo = memo_input.strip()
+            if memo:
+                add_memo_db(memo)
+                st.rerun()
+
+        max_memos = 10
+        memos = get_memos_db(max_memos)
+        for idx, memo in enumerate(memos):
+            memo_id = memo[0]
+            content = memo[1]
+            is_expanded = st.session_state.get(f"memo_expanded_{memo_id}", False)
+            box_height = 120 if not is_expanded else 300
+            display_text = content if is_expanded else (content.split('\n')[0][:60] + ("..." if len(content) > 60 else ""))
+            with st.container():
+                st.markdown(
+                    f"""
+                    <div style='
+                        background:#f9f9a1;
+                        border-radius:10px;
+                        box-shadow:0 1px 4px #eee;
+                        width:120px;
+                        min-height:120px;
+                        max-height:{box_height}px;
+                        height:{box_height}px;
+                        position:relative;
+                        padding:12px 16px 12px 16px;
+                        overflow-y:auto;
+                        display:flex;
+                        flex-direction:column;
+                        justify-content:flex-start;
+                        cursor:pointer;
+                    '>
+                        <div style='position:absolute;top:4px;right:8px;z-index:2;'></div>
+                        <div style='width:100%;height:100%;word-break:break-word;'>
+                            {display_text}
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+                btn_key = f"delete_memo_{memo_id}"
+                if st.button("x", key=btn_key):
+                    delete_memo_db(memo_id)
+                    st.rerun()
+                if not is_expanded:
+                    if st.button("View", key=f"expand_memo_{memo_id}"):
+                        st.session_state[f"memo_expanded_{memo_id}"] = True
+                        st.rerun()
+                else:
+                    if st.button("Collapse", key=f"collapse_memo_{memo_id}"):
+                        st.session_state[f"memo_expanded_{memo_id}"] = False
+                        st.rerun()
+
+        if len(memos) >= max_memos:
+            st.markdown(
+                "<div style='text-align:center;color:#888;font-size:0.95em;'>Scroll to see more memos</div>",
+                unsafe_allow_html=True
+            )
+
+    # --- Main Column: About Me, Social Media, Portfolio Upload, Portfolio Grid ---
+    with col_main:
+        # --- About Me Block ---
+        st.markdown("### About Me")
+        profile = get_profile()
+        about_text = st.text_area("Introduce yourself to the world:", value=profile[1], key="artist_about")
+        about_public = st.toggle("Add to Public Profile", value=bool(profile[2]), key="about_public_toggle")
+
+        # --- Social Media Block ---
+        st.markdown("### Social Media")
+        social_links = profile[3].split(",") if profile[3] else []
+        social_link_input = st.text_input("Add a social media link", key="social_link_input", placeholder="Paste your link here...")
+        if st.button("Add Link", key="add_social_link_btn"):
+            link = social_link_input.strip()
+            if link and link not in social_links:
+                social_links.append(link)
+                update_profile(about_text, int(about_public), ",".join(social_links), profile[4])
+                st.rerun()
+        for idx, link in enumerate(social_links):
+            link_cols = st.columns([8, 1])
+            with link_cols[0]:
+                st.markdown(f"<div style='background:#f0f0f0;padding:6px 10px;border-radius:6px;margin-bottom:4px;font-size:0.95em'>{link}</div>", unsafe_allow_html=True)
+            with link_cols[1]:
+                if st.button("❌", key=f"delete_social_{idx}"):
+                    social_links.pop(idx)
+                    update_profile(about_text, int(about_public), ",".join(social_links), profile[4])
+                    st.rerun()
+        publish_social = st.toggle("Add to Public Profile", value=bool(profile[4]), key="publish_social_toggle")
+        update_profile(about_text, int(about_public), ",".join(social_links), int(publish_social))
+
+        # --- Portfolio Upload Section ---
+        st.markdown("## Portfolio: Upload Photos")
+        upload_type = st.radio(
+            "Choose upload type:",
+            [
+                "Upload with Face Sketch (multiple pairs)",
+                "Upload Regular Images (multiple)",
+                "Upload AI Photos",
+                "Upload Videos"
+            ],
+            key="photo_upload_type"
+        )
+        # ... (upload logic as before) ...
+
+        # --- Quick Stats Block ---
+        st.markdown("### Quick Stats")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("⭐ Rating", "4.9")
+        col2.metric("Reviews", "120")
+        col3.metric("Views", "35K")
+        col4.metric("Bookings", "8")
+
+        # --- Portfolio Block ---
+        st.markdown("----")
+        st.markdown("## Portfolio")
+        projects = load_projects_from_db()
+        if not projects:
+            st.info("No projects yet. Add your first project above!")
+        else:
+            cols = st.columns(2)
+            for idx, proj in enumerate(projects):
+                with cols[idx % 2]:
+                    with st.container():
+                        delete_col, content_col = st.columns([0.1, 0.9])
+                        with delete_col:
+                            if st.button("❌", key=f"delete_proj_{proj[0]}"):
+                                delete_project(proj[0])
+                                st.rerun()
+                        with content_col:
+                            st.markdown(f"### {proj[2]}")
+                            # ... (project display logic as before) ...
+                            public_status = proj[12] if len(proj) > 12 else 0
+                            btn_cols = st.columns(2)
+                            with btn_cols[0]:
+                                if st.button("Add to Public Profile", key=f"add_public_{proj[0]}"):
+                                    set_project_public(proj[0], True)
+                                    st.rerun()
+                            with btn_cols[1]:
+                                if st.button("Remove from Public Profile", key=f"remove_public_{proj[0]}"):
+                                    set_project_public(proj[0], False)
+                                    st.rerun()
+                            if public_status:
+                                st.markdown("<span style='color:green;font-weight:bold;'>On Public Profile</span>", unsafe_allow_html=True)
+                            else:
+                                st.markdown("<span style='color:#888;'>Not on Public Profile</span>", unsafe_allow_html=True)
+
+##### ========== BOOKINGS TAB ========== #####
+##### ========== BOOKINGS TAB ========== #####
+if tab == "Bookings":
+    st.markdown("### Booking Availability")
+    available_checkbox = st.checkbox(
+        "Available for Booking",
+        value=availability.get("available", False),
+        key="available_checkbox"
+    )
+    if available_checkbox != availability.get("available", False):
+        availability["available"] = available_checkbox
+        save_to_db("availability", user_id, availability)
+        st.session_state["availability"] = availability
+        st.success("Booking availability updated!")
+
+    if availability.get("available"):
+        st.info("You are currently available for bookings.")
+    else:
+        st.warning("You are not available for bookings.")
+
+    availability["region"] = st.selectbox(
+        "Region",
+        REGIONS,
+        index=REGIONS.index(availability.get("region", REGIONS[0])),
+        key="region"
+    )
+    availability["timezone"] = st.selectbox(
+        "Time Zone",
+        pytz.all_timezones,
+        index=pytz.all_timezones.index(availability.get("timezone", "UTC")),
+        key="timezone"
+    )
+    mode_keys = ["same", "custom", "contact"]
+    mode_labels = ["Same time for every day", "Inconsistent time and day", "Please contact me directly to book"]
+    booking_mode = st.radio(
+        "How do you want to set your available hours?",
+        mode_labels,
+        index=mode_keys.index(availability.get("mode", "same")),
+        key="booking_mode"
+    )
+    selected_mode = mode_keys[mode_labels.index(booking_mode)]
+    today = datetime.date.today()
+
+    if selected_mode == "same":
+        selected_blocks = st.multiselect(
+            "Available time blocks (applies to all days):",
+            TIME_BLOCKS,
+            default=availability.get("blocks", []),
+            key="blocks_same"
+        )
+        off_days = st.multiselect(
+            "Select your off days:",
+            ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+            default=availability.get("off_days", []),
+            key="off_days"
+        )
+        if st.button("Save Booking Hours (Same)", key="save_same"):
+            availability.update({
+                "mode": "same",
+                "blocks": selected_blocks,
+                "off_days": off_days,
+                "dates": [],
+                "available": True
+            })
+            save_to_db("availability", user_id, availability)
+            st.session_state["availability"] = availability
+            st.success("Saved your availability (Same Time Mode)!")
+    elif selected_mode == "custom":
+        saved_custom = availability.get("dates", [])
+        saved_dates = [datetime.date.fromisoformat(d[0]) for d in saved_custom]
+        date_block_map = {d[0]: d[1] for d in saved_custom}
+        selected_dates = st.date_input(
+            "Select available dates",
+            value=saved_dates if saved_dates else [today],
+            min_value=today,
+            key="custom_dates"
+        )
+        custom_dates = []
+        for d in selected_dates:
+            blocks = st.multiselect(
+                f"Time blocks for {d}:",
+                TIME_BLOCKS,
+                default=date_block_map.get(str(d), []),
+                key=f"blocks_{d}"
+            )
+            if blocks:
+                custom_dates.append((str(d), blocks))
+        if st.button("Save Booking Hours (Custom)", key="save_custom"):
+            availability.update({
+                "mode": "custom",
+                "dates": custom_dates,
+                "blocks": [],
+                "off_days": [],
+                "available": True
+            })
+            save_to_db("availability", user_id, availability)
+            st.session_state["availability"] = availability
+            st.success("Saved your availability (Custom Dates)!")
+    elif selected_mode == "contact":
+        if st.button("Save Booking Hours (Contact Only)", key="save_contact"):
+            availability.update({
+                "mode": "contact",
+                "blocks": [],
+                "off_days": [],
+                "dates": [],
+                "available": True
+            })
+            save_to_db("availability", user_id, availability)
+            st.session_state["availability"] = availability
+            st.success("Saved your availability (Contact Mode)!")
+
+    st.markdown("### Your Current Booking Availability")
+    if availability.get("available"):
+        st.info("You are currently available for bookings.")
+        if availability.get("mode") == "same" and availability.get("blocks"):
+            st.markdown(f"**Time blocks (all days):** {', '.join(availability['blocks'])}")
+            if availability.get("off_days"):
+                st.markdown(f"**Off days:** {', '.join(availability['off_days'])}")
+        elif availability.get("mode") == "custom" and availability.get("dates"):
+            st.markdown("**Custom available dates and time blocks:**")
+            for date, blocks in availability["dates"]:
+                st.markdown(f"- {date}: {', '.join(blocks)}")
+        elif availability.get("mode") == "contact":
+            st.markdown("_Clients must contact you directly to book._")
+    else:
+        st.warning("You are not available for bookings.")
+
+    st.markdown("### Your Services")
+    with st.form("add_service_form", clear_on_submit=True):
+        name = st.text_input("Service Name")
+        price = st.number_input("Price", min_value=0.0, step=1.0)
+        currency = st.selectbox("Currency", ["USD", "EUR", "VND"])
+        desc = st.text_area("Description")
+        duration = st.number_input("Duration (minutes)", min_value=15, max_value=480, step=15, value=60)
+        submit = st.form_submit_button("Add Service")
+        if submit:
+            if not name.strip():
+                st.warning("Service name is required.")
+            elif price <= 0:
+                st.warning("Price must be greater than 0.")
+            elif any(s["name"].lower() == name.lower() and s["currency"] == currency for s in services):
+                st.warning("This service already exists.")
+            else:
+                services.append({
+                    "name": name,
+                    "price": price,
+                    "currency": currency,
+                    "desc": desc,
+                    "duration": duration
+                })
+                save_to_db("services", user_id, services)
+                st.session_state["services"] = services
+                st.success("Service added!")
+
+    if services:
+        for idx, svc in enumerate(services):
+            col1, col2 = st.columns([0.9, 0.1])
+            with col1:
+                st.markdown(f"**{svc['name']}** - {svc['price']} {svc['currency']} ({svc['duration']} mins)  \n_{svc['desc']}_")
+            with col2:
+                if st.button("❌", key=f"remove_service_{idx}"):
+                    services.pop(idx)
+                    save_to_db("services", user_id, services)
+                    st.session_state["services"] = services
+                    st.rerun()
+    else:
+        st.info("No services added yet.")
+
+    st.markdown("### Feedback & Ratings")
+    feedbacks = get_feedback(user_id)
+    if feedbacks:
+        avg_rating = sum(fb["rating"] for fb in feedbacks) / len(feedbacks)
+        st.markdown(f"**Average Rating:** {'★' * int(avg_rating)} {avg_rating:.1f}/5 ({len(feedbacks)} reviews)")
+        st.markdown(
+            "<span style='font-size:0.9em; color:#888;'>How people think about me? <a href='#' style='font-size:0.8em;'>(Click to view)</a></span>",
+            unsafe_allow_html=True
+        )
+        for fb in feedbacks[:3]:
+            st.markdown(f"- {fb['client_name']}: {'★'*fb['rating']} {fb['comment']}")
+    else:
+        st.info("No feedback yet.")
+
+    st.markdown("### Analytics")
+    analytics = get_analytics(user_id)
+    st.write("Total Bookings:", analytics.get("total_bookings", 0))
+    st.write("Most Popular Service:", analytics.get("popular_service", "N/A"))
+    st.write("Peak Booking Times:", analytics.get("peak_times", "N/A"))
+    st.write("Total Reviews:", analytics.get("total_reviews", 0))
+
+    st.markdown("### Booking History")
+    booking_history = load_bookings_from_db(user_id)
+    if booking_history:
+        # Column headers
+        col1, col2, col3, col4 = st.columns([6, 2, 1, 1])
+        with col1:
+            st.markdown("**Booking**")
+        with col2:
+            st.markdown("**Visited?**")
+        with col3:
+            st.markdown("**Message**")
+        with col4:
+            st.markdown("")
+
+        for idx, b in enumerate(booking_history):
+            col1, col2, col3, col4 = st.columns([6, 2, 1, 1])
+            with col1:
+                st.markdown(
+                    f"- **{b['client_name']}** ({b['client_email']}) booked **{b['service']}** on **{b['date']}** at **{b['time']}**"
+                )
+            with col2:
+                # Ensure session state is initialized
+                if "visited_status" not in st.session_state:
+                    st.session_state["visited_status"] = load_visited_status_from_db(user_id)
+
+                visit_key = f"visited_{b['id']}"
+                previous_status = st.session_state["visited_status"].get(b['id'])
+                visit_status = st.radio(
+                    "Visited?",  # Use a non-empty label
+                    ["Yes", "No"],
+                    key=visit_key,
+                    horizontal=True,
+                    label_visibility="collapsed"
+                )
+                st.session_state["visited_status"][b['id']] = visit_status
+
+                # Save to DB only if changed
+                if previous_status != visit_status:
+                    save_visited_status_to_db(user_id, b['id'], visit_status)
+            with col3:
+                msg_icon_key = f"msg_icon_{b['id']}"
+                if st.button("💬", key=msg_icon_key, help="Message client"):
+                    st.session_state["show_msg_popup"] = b['id']
+            with col4:
+                st.markdown("")
+
+            # --- Message Popup ---
+            if st.session_state.get("show_msg_popup") == b['id']:
+                st.markdown("---")
+                st.markdown(f"**Send message to {b['client_name']} ({b['client_email']})**")
+                msg_content = st.text_area("Your message:", key=f"msg_content_{b['id']}")
+                send_btn = st.button("Send", key=f"send_msg_{b['id']}")
+                close_btn = st.button("Close", key=f"close_msg_{b['id']}")
+
+                if send_btn:
+                    msg = {
+                        "from": "owner",
+                        "email": "",  # Optionally fill with artist email if available
+                        "content": msg_content,
+                        "time": datetime.datetime.now(),
+                        "to": b["client_email"]
+                    }
+                    save_message_to_db(msg)
+                    st.session_state["messages"] = load_messages_from_db(user_id)
+		    st.rerun()
+                    st.success("Message sent!")
+                    st.session_state["show_msg_popup"] = None
+
+                if close_btn:
+                    st.session_state["show_msg_popup"] = None
+    else:
+        st.info("No booking history yet.")
+
+
+
+
+    # --- Messaging with Clients (if needed) ---
+    #st.markdown("### Client Messaging")
+    #if "messages" not in st.session_state:
+    #    st.session_state["messages"] = []
+    #msg_to = st.text_input("Send a message to client:")
+    #msg_content = st.text_area("Message:")
+    #if st.button("Send Message"):
+    #    st.session_state["messages"].append({"to": msg_to, "content": msg_content, "time": datetime.now()})
+    #    st.success("Message sent!")
+
+##### ========== OTHER TABS ========== #####
+if tab == "Feedback & Ratings":
+    st.header("⭐ Feedback & Ratings")
+    st.info("This will show customer feedback and star ratings.")
+    st.write("You will be able to reply to reviews and see testimonials here.")
+
+elif tab == "Collaboration":
+    st.header("🤝 Collaboration")
+    st.info("Active projects, invitations, and shared workspace will appear here.")
+    st.write("Start a new collaboration, manage invites, and chat with collaborators.")
+
+elif tab == "Drafts":
+    st.header("📝 Drafts & Unpublished Work")
+    st.info("Manage your drafts and unpublished designs here.")
+    st.write("Private notes and idea jotting will be available.")
+
+elif tab == "Analytics":
+    st.header("📊 Analytics")
+    st.write("**Profile Views:** 1,200 this month")
+    st.write("**Photo Likes:** 350 on 'Electric Blue' look")
+    st.write("**Comments:** 25 on your latest video")
+    st.write("**Bookings from Page:** 8 new clients this month")
+    st.write("**Social Clicks:** 40 people visited your Instagram")
+    st.info("More detailed engagement and conversion stats coming soon!")
+
+elif tab == "Settings":
+    st.header("🔧 Settings")
+    st.text_input("Instagram URL", key="settings_ig")
+    st.text_input("TikTok URL", key="settings_tt")
+    st.text_input("Portfolio Site", key="settings_portfolio")
+    st.write("Profile/account settings, notification preferences, and privacy controls will be managed here.")
+if tab == "Messages":
+    st.header("📨 Messages")
+    for idx, msg in enumerate(messages):
+        st.markdown(f"**From:** {msg.get('from', msg.get('to',''))}  \n**Email:** {msg.get('email','')}  \n**Time:** {msg['time']}")
+        st.markdown(f"> {msg['content']}")
+        reply_btn = st.button("Reply", key=f"reply_btn_{idx}")
+
+        # Show reply area if this message is being replied to
+        if st.session_state.get("replying_to") == idx:
+            reply_content = st.text_area("Your reply:", key=f"reply_content_{idx}")
+            send_reply = st.button("Send Reply", key=f"send_reply_{idx}")
+            if send_reply:
+                msg = {
+                    "from": "artist",  # or your user/artist name
+                    "email": "",  # your email or leave blank
+                    "content": reply_content,
+                    "time": datetime.datetime.now(),
+                    "to": msg.get("email", "")
+                }
+                save_message_to_db(msg)
+                st.session_state["messages"] = load_messages_from_db(user_id)
+		st.rerun()
+                st.success("Reply sent!")
+                st.session_state["replying_to"] = None
+            if st.button("Cancel", key=f"cancel_reply_{idx}"):
+                st.session_state["replying_to"] = None
+        elif reply_btn:
+            st.session_state["replying_to"] = idx
+
+        st.markdown("---")
+
+
+
+

@@ -1,0 +1,757 @@
+import streamlit as st
+import base64
+import pytz
+import datetime
+
+from streamlit_calendar import calendar
+
+# --- Sidebar Profile Personalization ---
+if "roles" not in st.session_state:
+    st.session_state["roles"] = []
+if "editing_role" not in st.session_state:
+    st.session_state["editing_role"] = False
+
+if st.sidebar.button("View Public Profile", key="sidebar_public_profile_btn"):
+    st.info("This will show your public-facing profile as others see it.")
+
+profile_img = st.sidebar.file_uploader("Upload profile image", type=["png", "jpg", "jpeg"], key="profile_img")
+if profile_img:
+    st.sidebar.image(profile_img, width=120)
+else:
+    st.sidebar.image("makeup_artist_card.png", width=120)
+
+if "memos" not in st.session_state:
+    st.session_state["memos"] = []
+
+if "memo_expanded" not in st.session_state:
+    st.session_state["memo_expanded"] = {}
+
+if "services" not in st.session_state:
+    st.session_state["services"] = []
+
+if "notifications" not in st.session_state:
+    st.session_state["notifications"] = [
+        "New booking request from Alex (July 10, 2pm)",
+        "Feedback received: 'Loved the look!'",
+        "Collaboration invite from Face Designer Mia",
+        "Booking confirmed for July 12, 4pm"
+    ]
+if "artist_name" not in st.session_state:
+    st.session_state["artist_name"] = "Jane Doe"
+if "editing_name" not in st.session_state:
+    st.session_state["editing_name"] = False
+
+if st.sidebar.button("Change Name", key="sidebar_change_name"):
+    st.session_state["editing_name"] = True
+
+if st.session_state["editing_name"]:
+    new_name = st.sidebar.text_input("Enter your name", value=st.session_state["artist_name"], key="sidebar_name_input")
+    if st.sidebar.button("Save Name", key="sidebar_save_name"):
+        st.session_state["artist_name"] = new_name
+        st.session_state["editing_name"] = False
+else:
+    st.sidebar.markdown(f"**{st.session_state['artist_name']}**")
+
+st.sidebar.markdown("⭐ 4.9 | 120 Reviews | 35K Views")
+
+
+# --- Current Role Section ---
+st.sidebar.markdown("**I am **", unsafe_allow_html=True)
+
+if not st.session_state["editing_role"]:
+    # Show current roles in bold black
+    if st.session_state["roles"]:
+        st.sidebar.markdown(
+            f"<span style='font-weight:bold;color:#111;font-size:1.05em'>{', '.join(st.session_state['roles'])}</span>",
+            unsafe_allow_html=True
+        )
+    else:
+        st.sidebar.markdown(
+            "<span style='font-weight:bold;color:#888;font-size:1.05em'>No role selected</span>",
+            unsafe_allow_html=True
+        )
+    # Edit button
+    if st.sidebar.button("Edit Role", key="edit_role_btn"):
+        st.session_state["editing_role"] = True
+else:
+    # Role selection appears
+    role_options = ["A Makeup Artist", "A Face Designer", "A Photographer" , "An Explorer"]
+    selected_roles = st.sidebar.multiselect(
+        "Select your roles (choose one or more):",
+        role_options,
+        default=st.session_state["roles"],
+        key="role_multiselect"
+    )
+    # Save and Cancel buttons
+    col_save, col_cancel = st.sidebar.columns([1, 1])
+    with col_save:
+        if st.button("Save Role", key="save_role_btn"):
+            st.session_state["roles"] = selected_roles
+            st.session_state["editing_role"] = False
+    with col_cancel:
+        if st.button("Cancel", key="cancel_role_btn"):
+            st.session_state["editing_role"] = False
+
+
+
+# --- Notification Option in Sidebar Navigation ---
+notification_count = len(st.session_state["notifications"])
+notification_label = (
+    f"Notifications "
+    f"<span style='background:#e74c3c;color:#fff;border-radius:6px;padding:2px 8px;"
+    f"font-size:0.9em;vertical-align:middle;margin-left:6px;'>{notification_count}</span>"
+    if notification_count > 0 else "Notifications"
+)
+tab = st.sidebar.radio(
+    "Navigation",
+    [
+        "Dashboard",
+        "Bookings",
+        "Feedback & Ratings",
+        "Collaboration",
+        "Drafts",
+        "Analytics",
+        "Settings",
+        st.markdown(notification_label, unsafe_allow_html=True)
+    ],
+    index=0
+)
+
+# --- Notifications as Option ---
+if tab == "Notifications" or (isinstance(tab, str) and tab.startswith("Notifications")):
+    st.header("🔔 Notifications")
+    for idx, note in enumerate(st.session_state["notifications"]):
+        notif_box = f"""
+        <div style='background:#f9f9f9;border:1px solid #e0e0e0;border-radius:8px;
+        padding:10px 16px;margin-bottom:8px;position:relative;'>
+            <span style='font-size:1em;'>{note}</span>
+            <button style='position:absolute;top:6px;right:10px;background:transparent;
+            border:none;font-size:1.1em;color:#e74c3c;cursor:pointer;'
+            onclick="window.location.href='?delete_notif={idx}'">×</button>
+        </div>
+        """
+        st.markdown(notif_box, unsafe_allow_html=True)
+    st.stop()
+
+if "face_sketch_pairs" not in st.session_state:
+    st.session_state["face_sketch_pairs"] = []
+if "regular_images" not in st.session_state:
+    st.session_state["regular_images"] = []
+if "ai_images" not in st.session_state:
+    st.session_state["ai_images"] = []
+if "video_files" not in st.session_state:
+    st.session_state["video_files"] = []
+
+# --- Main Content Area ---
+#if tab == "Dashboard":
+    # --- Left Column: Memo Only ---
+    #col_left, col_main = st.columns([1, 3])
+
+    #with col_left:
+        #st.markdown("### Memo")
+
+        # --- Main Content Area ---
+if tab == "Dashboard":
+    # --- Left Column: Memo Only ---
+    col_left, col_main = st.columns([1, 3])
+
+    with col_left:
+        st.markdown("### Memo")
+
+        def add_memo():
+            memo = st.session_state.get("memo_input", "").strip()
+            if memo:
+                st.session_state["memos"].insert(0, memo)
+                st.session_state["memo_input"] = ""
+
+        st.text_area("Add a memo", key="memo_input", placeholder="Type a memo...", height=None)
+        st.button("Save Memo", key="add_memo_btn", on_click=add_memo)
+
+        max_memos = 10
+        memos = st.session_state["memos"]
+        show_memos = memos[:max_memos]
+
+        for idx, memo in enumerate(show_memos):
+            is_expanded = st.session_state["memo_expanded"].get(idx, False)
+            box_height = 120 if not is_expanded else 300
+            display_text = memo if is_expanded else (memo.split('\n')[0][:60] + ("..." if len(memo) > 60 else ""))
+            # Create a unique container for each memo to keep the button inside
+            with st.container():
+                # Use columns to overlay the button, but visually place it inside the box
+                st.markdown(
+                    f"""
+                    <div style='
+                        background:#f9f9a1;
+                        border-radius:10px;
+                        box-shadow:0 1px 4px #eee;
+                        width:120px;
+                        min-height:120px;
+                        max-height:{box_height}px;
+                        height:{box_height}px;
+                        position:relative;
+                        padding:12px 16px 12px 16px;
+                        overflow-y:auto;
+                        display:flex;
+                        flex-direction:column;
+                        justify-content:flex-start;
+                        cursor:pointer;
+                    '>
+                        <div style='position:absolute;top:4px;right:8px;z-index:2;'>
+                            <!-- The button will be rendered here by Streamlit -->
+                        </div>
+                        <div style='width:100%;height:100%;word-break:break-word;'>
+                            {display_text}
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+                # Use absolute positioning for the button, but render it right after the markdown
+                btn_key = f"delete_memo_{idx}"
+                btn_style = """
+                    <style>
+                    div[data-testid="stButton"] button#%s {
+                        position: absolute !important;
+                        top: 16px !important;
+                        right: 24px !important;
+                        background: transparent !important;
+                        border: none !important;
+                        color: #e74c3c !important;
+                        font-size: 1.1em !important;
+                        padding: 0 !important;
+                        z-index: 3 !important;
+                    }
+                    </style>
+                """ % btn_key
+                st.markdown(btn_style, unsafe_allow_html=True)
+                if st.button("x", key=btn_key):
+                    st.session_state["memos"].pop(idx)
+                    st.session_state["memo_expanded"].pop(idx, None)
+                    st.experimental_rerun()
+                # Expand/collapse button below the box
+                if not is_expanded:
+                    if st.button("View", key=f"expand_memo_{idx}"):
+                        st.session_state["memo_expanded"][idx] = True
+                else:
+                    if st.button("Collapse", key=f"collapse_memo_{idx}"):
+                        st.session_state["memo_expanded"][idx] = False
+
+
+        st.markdown("</div>", unsafe_allow_html=True)
+        if len(memos) > max_memos:
+            st.markdown(
+                "<div style='text-align:center;color:#888;font-size:0.95em;'>Scroll to see more memos</div>",
+                unsafe_allow_html=True
+            )
+
+
+
+    with col_main:
+        # --- About Me Block ---
+        st.markdown("### About Me")
+        about_public = st.toggle("Add to Public Profile", value=True, key="about_public_toggle")
+        if about_public:
+            st.success("This section is published to your public profile.")
+        else:
+            st.warning("This section is private and not shown on your public profile.")
+        about_text = st.text_area("Introduce yourself to the world:", key="artist_about")
+
+        # --- Social Media Block (Below About Me) ---
+        st.markdown("### Social Media")
+        if "social_links" not in st.session_state:
+            st.session_state["social_links"] = []
+        def add_social_link():
+            link = st.session_state.get("social_link_input", "").strip()
+            if link:
+                st.session_state["social_links"].append(link)
+                st.session_state["social_link_input"] = ""
+        st.text_input("Add a social media link", key="social_link_input", placeholder="Paste your link here...")
+        st.button("Add Link", key="add_social_link_btn", on_click=add_social_link)
+        for idx, link in enumerate(st.session_state["social_links"]):
+            link_cols = st.columns([8, 1])
+            with link_cols[0]:
+                st.markdown(f"<div style='background:#f0f0f0;padding:6px 10px;border-radius:6px;margin-bottom:4px;font-size:0.95em'>{link}</div>", unsafe_allow_html=True)
+            with link_cols[1]:
+                if st.button("❌", key=f"delete_social_{idx}"):
+                    st.session_state["social_links"].pop(idx)
+                    st.rerun()
+        publish_social = st.toggle("Add to Public Profile", value=True, key="publish_social_toggle")
+        if publish_social:
+            st.success("Your social media links are public.")
+        else:
+            st.warning("Your social media links are private.")
+
+        # --- Quick Stats Block ---
+        st.markdown("### Quick Stats")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("⭐ Rating", "4.9")
+        col2.metric("Reviews", "120")
+        col3.metric("Views", "35K")
+        col4.metric("Bookings", "8")
+
+        # --- Portfolio Block ---
+        st.markdown("### Portfolio: Upload Photos")
+        upload_type = st.radio(
+            "Choose upload type:",
+            [
+                "Upload with Face Sketch (multiple pairs)",
+                "Upload Regular Images (multiple)",
+                "Upload AI Photos",
+                "Upload Videos"
+            ],
+            key="photo_upload_type"
+        )
+
+        def rectangle_frame_html(img_bytes, x_offset=0, y_offset=0):
+            if img_bytes is None:
+                return ""
+            img_bytes.seek(0)
+            img_b64 = base64.b64encode(img_bytes.read()).decode()
+            return f"""
+            <div style='width:160px; height:130px; position:relative; margin:auto;'>
+              <div style="position:absolute;top:0;left:0;width:160px;height:130px;
+                          border:4px solid #e0e0e0; border-radius:14px; background:#fff;">
+              </div>
+              <img src="data:image/png;base64,{img_b64}" style="
+                position:absolute;
+                left:calc(50% + {x_offset}px - 60px);
+                top:calc(50% + {y_offset}px - 60px);
+                width:120px; height:120px; object-fit:contain;"/>
+            </div>
+            """
+
+        if upload_type == "Upload with Face Sketch (multiple pairs)":
+            st.markdown("#### Upload Face Sketch + Final Look Pairs")
+            pair_count = st.number_input(
+                "How many pairs do you want to upload?",
+                min_value=1, max_value=10, value=1, key="pair_count"
+            )
+
+            pairs = []
+            for i in range(pair_count):
+                st.markdown(f"##### Pair {i+1}")
+
+                sketch = st.file_uploader(
+                    "Sketch", type=["png", "jpg", "jpeg"], key=f"sketch_{i}", label_visibility="visible",
+                    help="Upload the face sketch"
+                )
+                final = st.file_uploader(
+                    "Final Look", type=["png", "jpg", "jpeg"], key=f"final_{i}", label_visibility="visible",
+                    help="Upload the final look"
+                )
+                designer = st.text_input("Designer Name", key=f"designer_{i}", placeholder="Name")
+                social = st.text_input("Designer Social Link", key=f"designer_social_{i}", placeholder="Social")
+                comment = st.text_area("Comment/Description", key=f"pair_comment_{i}", placeholder="Comment", height=68)
+
+                pairs.append({
+                    "sketch": sketch,
+                    "final": final,
+                    "designer": designer,
+                    "social": social,
+                    "comment": comment
+                })
+
+            # Preview and remove pairs with rectangle frame and individual centering controls
+            st.markdown("#### Preview Pairs")
+            for i, pair in enumerate(pairs):
+                if pair["sketch"] and pair["final"]:
+                    st.markdown(f"##### Pair {i+1} Preview")
+                    # Individual controls for each image
+                    col_controls, col_preview = st.columns([1, 3])
+                    with col_controls:
+                        st.markdown("**Sketch Pos.**")
+                        x_offset_sketch = st.slider("H", -50, 50, 0, key=f"x_offset_sketch_{i}", label_visibility="collapsed")
+                        y_offset_sketch = st.slider("V", -50, 50, 0, key=f"y_offset_sketch_{i}", label_visibility="collapsed")
+                        st.markdown("**Final Pos.**")
+                        x_offset_final = st.slider("H ", -50, 50, 0, key=f"x_offset_final_{i}", label_visibility="collapsed")
+                        y_offset_final = st.slider("V ", -50, 50, 0, key=f"y_offset_final_{i}", label_visibility="collapsed")
+                    with col_preview:
+                        # Stack sketch frame on top, final look below
+                        st.markdown(rectangle_frame_html(pair["sketch"], x_offset_sketch, y_offset_sketch), unsafe_allow_html=True)
+                        st.markdown(rectangle_frame_html(pair["final"], x_offset_final, y_offset_final), unsafe_allow_html=True)
+                        st.markdown(f"**Designer:** {pair['designer']}  \n**Social:** {pair['social']}  \n**Comment:** {pair['comment']}")
+                    if st.button("❌ Remove Pair", key=f"remove_pair_{i}"):
+                        pairs[i] = None
+
+            # Confirm upload
+            if st.button("Upload to your Public Profile", key="upload_pairs_btn"):
+                for pair in pairs:
+                    if pair and pair["sketch"] and pair["final"]:
+                        st.session_state["face_sketch_pairs"].append(pair)
+                st.success("Face Sketch pairs uploaded to your public profile!")
+
+            # --- Display Uploaded Face Sketch Pairs with Rectangle Frame ---
+            #for i, pair in enumerate(st.session_state["face_sketch_pairs"]):
+                #st.markdown(
+                    #f"""
+                    #<div style='display: flex; flex-direction:column; gap: 10px; margin-bottom: 16px;'>
+                        #{rectangle_frame_html(pair['sketch'])}
+                        #{rectangle_frame_html(pair['final'])}
+                        #<div>
+                            #<b>Designer:</b> {pair['designer']}<br>
+                            #<b>Social:</b> {pair['social']}<br>
+                            #<b>Comment:</b> {pair['comment']}
+                        #</div>
+                    #</div>
+                    #""",
+                    #unsafe_allow_html=True
+                #)
+                #if st.button("❌ Delete Pair", key=f"delete_pair_{i}"):
+                    #st.session_state["face_sketch_pairs"].pop(i)
+                    #st.experimental_rerun()
+
+        elif upload_type == "Upload Regular Images (multiple)":
+            st.markdown("#### Upload Regular Images")
+            img_files = st.file_uploader(
+                "Drag and drop images here",
+                accept_multiple_files=True,
+                type=["png", "jpg", "jpeg"],
+                key="regular_img_upload"
+            )
+
+            if img_files:
+                for img in img_files:
+                    if not any(img.name == item["img"].name for item in st.session_state["regular_images"]):
+                        st.session_state["regular_images"].append({"img": img, "comment": ""})
+
+            for idx, item in enumerate(st.session_state["regular_images"]):
+                cols = st.columns([1, 2, 0.1])
+                with cols[0]:
+                    if item["img"] is not None:
+                        item["img"].seek(0)
+                        st.image(item["img"], width=120)
+                with cols[1]:
+                    comment = st.text_area(
+                        f"Comment for image {idx+1}",
+                        value=item["comment"],
+                        key=f"regular_comment_{idx}"
+                    )
+                    st.session_state["regular_images"][idx]["comment"] = comment
+                with cols[2]:
+                    if st.button("❌", key=f"delete_regular_{idx}"):
+                        st.session_state["regular_images"].pop(idx)
+                        st.rerun()
+
+            if st.session_state["regular_images"]:
+                if st.button("Publish to Public Profile", key="publish_regular_btn"):
+                    st.success("Regular images have been published to your public profile!")
+
+        elif upload_type == "Upload AI Photos":
+            st.markdown("#### Upload AI Photos")
+            ai_files = st.file_uploader(
+                "Upload AI-generated images here",
+                accept_multiple_files=True,
+                type=["png", "jpg", "jpeg"],
+                key="ai_img_upload"
+            )
+            if ai_files:
+                for img in ai_files:
+                    if not any(img.name == item["img"].name for item in st.session_state["ai_images"]):
+                        st.session_state["ai_images"].append({"img": img, "comment": ""})
+
+            for idx, item in enumerate(st.session_state["ai_images"]):
+                cols = st.columns([1, 2, 0.1])
+                with cols[0]:
+                    if item["img"] is not None:
+                        item["img"].seek(0)
+                        st.image(item["img"], width=120)
+                with cols[1]:
+                    comment = st.text_area(
+                        f"Comment for AI image {idx+1}",
+                        value=item["comment"],
+                        key=f"ai_comment_{idx}"
+                    )
+                    st.session_state["ai_images"][idx]["comment"] = comment
+                with cols[2]:
+                    if st.button("❌", key=f"delete_ai_{idx}"):
+                        st.session_state["ai_images"].pop(idx)
+                        st.rerun()
+
+            if st.session_state["ai_images"]:
+                if st.button("Publish AI Photos to Public Profile", key="publish_ai_btn"):
+                    st.success("AI photos have been published to your public profile!")
+
+        elif upload_type == "Upload Videos":
+            st.markdown("#### Upload Videos")
+            video_files = st.file_uploader(
+                "Upload videos here",
+                accept_multiple_files=True,
+                type=["mp4", "mov"],
+                key="video_upload"
+            )
+            if video_files:
+                for vid in video_files:
+                    if not any(vid.name == item["vid"].name for item in st.session_state["video_files"]):
+                        st.session_state["video_files"].append({"vid": vid, "comment": ""})
+
+            for idx, item in enumerate(st.session_state["video_files"]):
+                cols = st.columns([1, 2, 0.1])
+                with cols[0]:
+                    if item["vid"] is not None:
+                        st.video(item["vid"])
+                with cols[1]:
+                    comment = st.text_area(
+                        f"Comment for video {idx+1}",
+                        value=item["comment"],
+                        key=f"video_comment_{idx}"
+                    )
+                    st.session_state["video_files"][idx]["comment"] = comment
+                with cols[2]:
+                    if st.button("❌", key=f"delete_video_{idx}"):
+                        st.session_state["video_files"].pop(idx)
+                        st.rerun()
+
+            if st.session_state["video_files"]:
+                if st.button("Publish Videos to Public Profile", key="publish_video_btn"):
+                    st.success("Videos have been published to your public profile!")
+
+# --- Bookings Tab ---
+
+import streamlit as st
+import pytz
+import datetime
+
+import streamlit as st
+import pytz
+import datetime
+
+# --- Bookings Tab ---
+if tab == "Bookings":
+    st.header("📅 Booking Availability")
+    available = st.toggle("Available for Booking", value=True, key="booking_available")
+    if available:
+        st.success("You are available for booking.")
+        region = st.selectbox("Region", ["Americas", "Europe", "Asia", "Australia"], key="booking_region")
+
+        # Use all valid time zones from pytz
+        all_timezones = pytz.all_timezones
+        timezone = st.selectbox("Time Zone", all_timezones, key="booking_timezone")
+
+        # --- Booking Time Selection First ---
+        st.markdown("#### Choose Your Booking Hours")
+        booking_mode = st.radio(
+            "How do you want to set your available hours?",
+            [
+                "Same time for every day",
+                "Inconsistent time and day",
+                "Please contact me directly to book"
+            ],
+            key="booking_mode"
+        )
+
+        time_blocks = [
+            "02:00–04:00", "04:00–06:00", "06:00–08:00", "08:00–10:00",
+            "10:00–12:00", "12:00–14:00", "14:00–16:00", "16:00–18:00",
+            "18:00–20:00", "20:00–22:00", "22:00–24:00"
+        ]
+
+        if booking_mode == "Same time for every day":
+            selected_blocks = st.multiselect(
+                "Select available time blocks (applies to all days):",
+                time_blocks,
+                key="same_time_blocks"
+            )
+            st.markdown("##### Do you take any off day?")
+            off_days = st.multiselect(
+                "Select your off days (optional):",
+                ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+                key="off_days"
+            )
+            if selected_blocks:
+                days_off_str = f" (Off: {', '.join(off_days)})" if off_days else ""
+                st.info(f"Your available hours for all days: {', '.join(selected_blocks)}{days_off_str}")
+            if st.button("Add to Public Profile", key="publish_same_time"):
+                st.success("Your booking hours have been published to your public profile!")
+
+        elif booking_mode == "Different time for each day":
+            st.markdown("#### Select Available Dates and Times")
+
+            # --- Month/Year Selection ---
+            today = datetime.date.today()
+            # Allow selection from current year +/- 2 years
+            years = list(range(today.year - 2, today.year + 3))
+            months = list(range(1, 13))
+            month_names = [datetime.date(2000, m, 1).strftime('%B') for m in months]
+
+            # Session state for selected month/year
+            if "calendar_year" not in st.session_state:
+                st.session_state["calendar_year"] = today.year
+            if "calendar_month" not in st.session_state:
+                st.session_state["calendar_month"] = today.month
+            if "calendar_selected_dates" not in st.session_state:
+                st.session_state["calendar_selected_dates"] = []
+
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col1:
+                if st.button("<", key="prev_month"):
+                    if st.session_state["calendar_month"] == 1:
+                        st.session_state["calendar_month"] = 12
+                        st.session_state["calendar_year"] -= 1
+                    else:
+                        st.session_state["calendar_month"] -= 1
+            with col2:
+                sel_year = st.selectbox("Year", years, index=years.index(st.session_state["calendar_year"]), key="calendar_year_select")
+                sel_month = st.selectbox("Month", month_names, index=st.session_state["calendar_month"]-1, key="calendar_month_select")
+                # Update session state if changed
+                if sel_year != st.session_state["calendar_year"]:
+                    st.session_state["calendar_year"] = sel_year
+                if months[month_names.index(sel_month)] != st.session_state["calendar_month"]:
+                    st.session_state["calendar_month"] = months[month_names.index(sel_month)]
+            with col3:
+                if st.button(">", key="next_month"):
+                    if st.session_state["calendar_month"] == 12:
+                        st.session_state["calendar_month"] = 1
+                        st.session_state["calendar_year"] += 1
+                    else:
+                        st.session_state["calendar_month"] += 1
+
+            # --- Build the calendar grid for the selected month/year ---
+            def get_month_grid(year, month):
+                first_of_month = datetime.date(year, month, 1)
+                first_weekday = first_of_month.weekday()  # 0=Monday
+                if month == 12:
+                    next_month = first_of_month.replace(year=year+1, month=1, day=1)
+                else:
+                    next_month = first_of_month.replace(month=month+1, day=1)
+                days_in_month = (next_month - first_of_month).days
+                days = [None]*first_weekday + [first_of_month + datetime.timedelta(days=i) for i in range(days_in_month)]
+                while len(days) % 7 != 0:
+                    days.append(None)
+                weeks = [days[i:i+7] for i in range(0, len(days), 7)]
+                return weeks
+
+            grid = get_month_grid(st.session_state["calendar_year"], st.session_state["calendar_month"])
+            st.markdown(f"**{month_names[st.session_state['calendar_month']-1]} {st.session_state['calendar_year']}**")
+
+            # --- Render the calendar grid ---
+            week_days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+            st.markdown(
+                "<div style='display:flex;gap:8px;margin-bottom:4px;'>" +
+                "".join([f"<div style='width:32px;text-align:center;font-weight:bold;color:#888'>{wd}</div>" for wd in week_days]) +
+                "</div>",
+                unsafe_allow_html=True
+            )
+            for week in grid:
+                cols = st.columns(7)
+                for i, d in enumerate(week):
+                    if d is None:
+                        cols[i].markdown("<div style='width:32px;height:32px;'></div>", unsafe_allow_html=True)
+                    else:
+                        is_selected = d in st.session_state["calendar_selected_dates"]
+                        btn_label = f"● {d.day}" if is_selected else str(d.day)
+                        btn_style = (
+                            "background-color:#f9f9a1;color:#222;border-radius:50%;"
+                            "width:32px;height:32px;font-weight:bold;border:2px solid #e0e0e0;"
+                            if is_selected else
+                            "background-color:#fff;color:#222;border-radius:50%;"
+                            "width:32px;height:32px;border:1px solid #e0e0e0;"
+                        )
+                        if cols[i].button(btn_label, key=f"calbtn_{d}"):
+                            if is_selected:
+                                st.session_state["calendar_selected_dates"].remove(d)
+                            else:
+                                st.session_state["calendar_selected_dates"].append(d)
+                        cols[i].markdown(
+                            f"<div style='{btn_style};display:inline-block;text-align:center;line-height:32px;margin-bottom:2px;'></div>",
+                            unsafe_allow_html=True
+                        )
+
+            selected_dates = sorted(st.session_state["calendar_selected_dates"])
+            if selected_dates:
+                st.info(f"You have selected {len(selected_dates)} available dates.")
+
+            # For each selected date, allow time block selection
+            date_time_blocks = {}
+            for date in selected_dates:
+                date_str = date.strftime("%A, %b %d, %Y")
+                date_time_blocks[date] = st.multiselect(
+                    f"Time blocks for {date_str}:",
+                    time_blocks,
+                    key=f"time_blocks_{date}"
+                )
+
+            # Preview
+            if selected_dates:
+                st.markdown("#### Preview of Your Booking Calendar")
+                for date in selected_dates:
+                    blocks = date_time_blocks.get(date, [])
+                    if blocks:
+                        st.markdown(f"- **{date.strftime('%A, %b %d, %Y')}:** {', '.join(blocks)}")
+                    else:
+                        st.markdown(f"- **{date.strftime('%A, %b %d, %Y')}:** _No time blocks selected_")
+            if st.button("Add to Public Profile", key="publish_diff_time"):
+                st.success("Your custom booking calendar has been published to your public profile!")
+
+        elif booking_mode == "Please contact me directly to book":
+            st.info("Clients will be instructed to contact you directly to arrange bookings.")
+            if st.button("Add to Public Profile", key="publish_contact_directly"):
+                st.success("Your booking preference has been published to your public profile!")
+    else:
+        st.warning("You are currently not available for booking.")
+
+
+    # --- Service Menu ---
+    st.markdown("### Service Menu")
+    with st.form("service_form_bookings", clear_on_submit=True):
+        service_name = st.text_input("Service Name", key="service_name_bookings")
+        service_price = st.number_input("Price", min_value=0.0, step=1.0, format="%.2f", key="service_price_bookings")
+        currency = st.selectbox("Currency", ["USD", "EUR", "VND", "JPY", "GBP", "AUD", "CAD", "SGD", "KRW", "CNY"], key="service_currency_bookings")
+        service_desc = st.text_area("Description", key="service_desc_bookings")
+        add_service = st.form_submit_button("Add Service")
+        if add_service and service_name and service_price:
+            st.session_state["services"].append({
+                "name": service_name,
+                "price": service_price,
+                "currency": currency,
+                "desc": service_desc
+            })
+
+    if st.session_state["services"]:
+        st.markdown("#### Your Services")
+        for idx, svc in enumerate(st.session_state["services"]):
+            st.markdown(
+                f"""
+                <div style='border:1px solid #eee; border-radius:8px; padding:10px 16px; margin-bottom:8px;'>
+                    <b>{svc['name']}</b> &nbsp;&nbsp; {svc['price']} {svc['currency']}<br>
+                    <span style='font-size:0.95em;color:#666'>{svc['desc']}</span>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+            if st.button("Remove", key=f"remove_service_booking_{idx}"):
+                st.session_state["services"].pop(idx)
+                st.experimental_rerun()
+        if st.button("Add to Public Profile", key="publish_services_booking_btn"):
+            st.success("All services have been published to your public profile!")
+
+
+elif tab == "Feedback & Ratings":
+    st.header("⭐ Feedback & Ratings")
+    st.info("This will show customer feedback and star ratings.")
+    st.write("You will be able to reply to reviews and see testimonials here.")
+
+elif tab == "Collaboration":
+    st.header("🤝 Collaboration")
+    st.info("Active projects, invitations, and shared workspace will appear here.")
+    st.write("Start a new collaboration, manage invites, and chat with collaborators.")
+
+elif tab == "Drafts":
+    st.header("📝 Drafts & Unpublished Work")
+    st.info("Manage your drafts and unpublished designs here.")
+    st.write("Private notes and idea jotting will be available.")
+
+elif tab == "Analytics":
+    st.header("📊 Analytics")
+    st.write("**Profile Views:** 1,200 this month")
+    st.write("**Photo Likes:** 350 on 'Electric Blue' look")
+    st.write("**Comments:** 25 on your latest video")
+    st.write("**Bookings from Page:** 8 new clients this month")
+    st.write("**Social Clicks:** 40 people visited your Instagram")
+    st.info("More detailed engagement and conversion stats coming soon!")
+
+elif tab == "Settings":
+    st.header("🔧 Settings")
+    st.text_input("Instagram URL", key="settings_ig")
+    st.text_input("TikTok URL", key="settings_tt")
+    st.text_input("Portfolio Site", key="settings_portfolio")
+    st.write("Profile/account settings, notification preferences, and privacy controls will be managed here.")

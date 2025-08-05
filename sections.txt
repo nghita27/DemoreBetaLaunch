@@ -1,0 +1,38 @@
+#==========================================================================
+if tab == "Feedback & Ratings":
+    st.header("⭐ Feedback & Ratings")
+    st.info("This will show customer feedback and star ratings.")
+    st.write("You will be able to reply to reviews and see testimonials here.")
+
+elif tab == "Collaboration":
+    st.header("🤝 Collaboration")
+    st.info("Active projects, invitations, and shared workspace will appear here.")
+    st.write("Start a new collaboration, manage invites, and chat with collaborators.")
+
+elif tab == "Drafts":
+    st.header("📝 Drafts & Unpublished Work")
+    st.info("Manage your drafts and unpublished designs here.")
+    st.write("Private notes and idea jotting will be available.")
+
+elif tab == "Analytics":
+    st.header("📊 Analytics")
+    st.write("**Profile Views:** 1,200 this month")
+    st.write("**Photo Likes:** 350 on 'Electric Blue' look")
+    st.write("**Comments:** 25 on your latest video")
+    st.write("**Bookings from Page:** 8 new clients this month")
+    st.write("**Social Clicks:** 40 people visited your Instagram")
+    st.info("More detailed engagement and conversion stats coming soon!")
+
+elif tab == "Settings":
+    st.header("🔧 Settings")
+    st.text_input("Instagram URL", key="settings_ig")
+    st.text_input("TikTok URL", key="settings_tt")
+    st.text_input("Portfolio Site", key="settings_portfolio")
+    st.write("Profile/account settings, notification preferences, and privacy controls will be managed here.")
+
+if tab == "Messages":
+    st.header("📨 Messages")
+    for msg in st.session_state.get("messages", []):
+        st.markdown(f"**From:** {msg['from']}  \n**Time:** {msg['timestamp']}")
+        st.markdown(f"> {msg['content']}")
+        st.markdown("---")

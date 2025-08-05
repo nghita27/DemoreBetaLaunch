@@ -1,0 +1,63 @@
+cd C:\Users\giang\OneDrive\Desktop\BeautyBlendApp
+beautyblend-env\Scripts\activate
+streamlit run canvas_test.py
+
+
+environment activate:
+C:\Users\giang>cd C:\Users\giang\OneDrive\Desktop\BeautyBlendApp
+C:\Users\giang\OneDrive\Desktop\BeautyBlendApp>beautyblend-env\Scripts\activate
+
+
+
+def generate_custom_face_chart(bg_img, landmarks, custom_connections):
+    """Generate a face chart using only the user-defined mesh connections."""
+    img = bg_img.copy()
+    draw = ImageDraw.Draw(img)
+
+    # Draw only the custom connections
+    for (start_idx, end_idx) in custom_connections:
+        start = landmarks[start_idx]
+        end = landmarks[end_idx]
+        draw.line([start, end], fill=(0, 0, 0), width=2)
+    return img
+
+def trace_to_connections(trace_paths, landmarks, img_size):
+    """Convert user traces to custom mesh connections"""
+    custom_connections = set()
+    for path in trace_paths:
+        if len(path) < 2: 
+            continue
+            
+        # Get start/end points
+        start = path[0]
+        end = path[-1]
+        
+        # Find nearest landmarks to endpoints
+        start_idx = min(range(len(landmarks)), 
+                        key=lambda i: np.linalg.norm(np.array(landmarks[i]) - np.array(start)))
+        end_idx = min(range(len(landmarks)), 
+                      key=lambda i: np.linalg.norm(np.array(landmarks[i]) - np.array(end)))
+        
+        # Add connection (sorted to avoid duplicates)
+        connection = tuple(sorted((start_idx, end_idx)))
+        custom_connections.add(connection)
+    
+    return custom_connections
+
+
+
+
+# ===== LANDMARK PROCESSING =====
+@st.cache_data(max_entries=3)
+def get_landmarks(pil_img):
+    cv_img = pil_to_cv2(pil_img)
+    img_height, img_width = cv_img.shape[:2]
+    landmarks = []
+    results = st.session_state.face_mesh.process(cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB))
+    if results.multi_face_landmarks:
+        for face_landmarks in results.multi_face_landmarks:
+            for lm in face_landmarks.landmark:
+                x = int(lm.x * img_width)
+                y = int(lm.y * img_height)
+                landmarks.append((x, y))
+    return landmarks

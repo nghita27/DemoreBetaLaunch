@@ -1,0 +1,973 @@
+#VERSION 5: best one
+#Version 2:
+# ===== IMPORTS =====
+import streamlit as st
+from PIL import Image, ImageDraw
+import numpy as np
+import mediapipe as mp
+import cv2
+import io
+import os
+from streamlit_drawable_canvas import st_canvas
+from scipy.spatial import Delaunay, ConvexHull
+import time
+
+# ===== MEDIAPIPE INITIALIZATION =====
+PRINT_READY = (3300, 4200)  # 11x14" @ 300 PPI
+PROCREATE_READY = (2400, 3000)  # Digital art size
+
+mp_face_mesh = mp.solutions.face_mesh
+mp_drawing = mp.solutions.drawing_utils
+
+# ===== PAGE CONFIG =====
+#st.set_page_config(page_title="BeautyBlend - Face Designer", layout="wide")
+
+# 3. Now import and use your theme function (if needed)
+from beautyblend_theme import apply_beautyblend_theme, face_designer_nav
+
+apply_beautyblend_theme("assets/artistic_polygon_bg.png")
+face_designer_nav("Face Chart Sketch")
+
+
+
+# ===== SESSION STATE INIT =====
+if 'prev_uploaded' not in st.session_state:
+    st.session_state.prev_uploaded = None
+if 'canvas_data' not in st.session_state:
+    st.session_state.canvas_data = {"objects": [], "background": None}
+if 'canvas_counter' not in st.session_state:
+    st.session_state.canvas_counter = 0
+if 'skin_tone' not in st.session_state:
+    st.session_state.skin_tone = 'Fair'
+if 'background_img' not in st.session_state:
+    st.session_state.background_img = None
+if 'landmarks' not in st.session_state:
+    st.session_state.landmarks = None
+if 'art_version' not in st.session_state:
+    st.session_state.art_version = 0
+
+# Initialize session state for AI enhancement
+if 'use_real_ai' not in st.session_state:
+    st.session_state.use_real_ai = False
+if 'face_mesh' not in st.session_state:
+    st.session_state.face_mesh = mp_face_mesh.FaceMesh(
+        static_image_mode=True,
+        max_num_faces=1,
+        refine_landmarks=True,
+        min_detection_confidence=0.5
+    )
+
+# ===== HELPER FUNCTIONS =====
+def get_custom_connections(indices):
+    """Create custom connections from landmark indices"""
+    return [(indices[i], indices[i+1]) for i in range(len(indices)-1)]
+
+# Example usage for custom cheek line:
+def get_custom_connections(indices):
+    """Create custom connections from landmark indices"""
+    return [(indices[i], indices[i+1]) for i in range(len(indices)-1)]
+
+
+def check_print_resolution(image, print_size_inches):
+    """Check if image meets 300 PPI print requirements"""
+    width, height = image.size
+    required_pp = 300  # Pixels per inch
+    required_w = print_size_inches[0] * required_pp
+    required_h = print_size_inches[1] * required_pp
+    return width >= required_w and height >= required_h
+
+def detect_and_zoom_face(image_path, zoom_factor=1.8):
+    """Detects face and zooms with padding"""
+    # Initialize MediaPipe Face Detection
+    mp_face_detection = mp.solutions.face_detection
+    face_detection = mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5)
+    
+    # Read image
+    image = cv2.imread(image_path)
+    if image is None:
+        return None
+    h, w, _ = image.shape
+    rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    
+    # Detect faces
+    results = face_detection.process(rgb_image)
+    
+    if results.detections:
+        # Get first face bounding box
+        bbox = results.detections[0].location_data.relative_bounding_box
+        x = int(bbox.xmin * w)
+        y = int(bbox.ymin * h)
+        width = int(bbox.width * w)
+        height = int(bbox.height * h)
+        
+        # Calculate zoomed region with 20% padding
+        padding_x = int(width * 0.2)
+        padding_y = int(height * 0.2)
+        x1 = max(0, x - padding_x)
+        y1 = max(0, y - padding_y)
+        x2 = min(w, x + width + padding_x)
+        y2 = min(h, y + height + padding_y)
+        
+        # Apply zoom factor
+        new_width = int((x2 - x1) * zoom_factor)
+        new_height = int((y2 - y1) * zoom_factor)
+        center_x = (x1 + x2) // 2
+        center_y = (y1 + y2) // 2
+        
+        # Calculate new boundaries
+        zoom_x1 = max(0, center_x - new_width // 2)
+        zoom_y1 = max(0, center_y - new_height // 2)
+        zoom_x2 = min(w, center_x + new_width // 2)
+        zoom_y2 = min(h, center_y + new_height // 2)
+
+        # Ensure minimum size
+        if (zoom_x2 - zoom_x1) < 100 or (zoom_y2 - zoom_y1) < 100:
+            return image  # Fallback to original
+        
+        # Crop and resize to original dimensions
+        zoomed = image[zoom_y1:zoom_y2, zoom_x1:zoom_x2]
+        return cv2.resize(zoomed, (w, h))
+    
+    return image  # Return original if no face detected
+
+def blend_drawing(base_img, drawing, opacity=0.3):
+    """Soft-blend drawings over filtered image"""
+    # Resize drawing to match base image
+    drawing = drawing.resize(base_img.size)
+    
+    # Convert to RGBA for blending
+    base = base_img.convert("RGBA")
+    drawing_rgba = drawing.convert("RGBA")
+    
+    # Blend with controlled opacity
+    return Image.blend(base, drawing_rgba, opacity)
+
+def draw_face_mesh(pil_img, connection_sets):
+    """Draw custom face mesh landmarks"""
+    if pil_img is None:
+        return None
+        
+    # Convert to OpenCV format
+    cv_img = np.array(pil_img.convert("RGB"))
+    results = st.session_state.face_mesh.process(cv_img)
+    
+    if results.multi_face_landmarks:
+        for face_landmarks in results.multi_face_landmarks:
+            # Draw selected connection sets
+            for connection_set in connection_sets:
+                mp_drawing.draw_landmarks(
+                    image=cv_img,
+                    landmark_list=face_landmarks,
+                    connections=connection_set,
+                    landmark_drawing_spec=None,
+                    connection_drawing_spec=mp_drawing.DrawingSpec(
+                        color=(0,255,0), thickness=1, circle_radius=1
+                    )
+                )
+    return Image.fromarray(cv_img)
+
+def get_skin_tone():
+    skin_tones = {
+        "Fair": (255, 224, 189),
+        "Medium": (210, 180, 140),
+        "Olive": (168, 139, 108),
+        "Deep": (115, 74, 48)
+    }
+    # Add default if not set
+    if 'skin_tone' not in st.session_state:
+        st.session_state.skin_tone = "Fair"
+    return skin_tones.get(st.session_state.skin_tone, (255, 224, 189))
+
+def reset_canvas_state():
+    st.session_state.canvas_data = {"objects": [], "background": None}
+
+def pil_to_cv2(pil_img):
+    return cv2.cvtColor(np.array(pil_img.convert("RGB")), cv2.COLOR_RGB2BGR)
+
+def cv2_to_pil(cv2_img):
+    return Image.fromarray(cv2.cvtColor(cv2_img, cv2.COLOR_BGR2RGB))
+
+# ===== HAND-DRAWN INTEGRATION v1 =====
+def create_triple_overlay(facemesh_img, traced_img, pencil_img, landmarks):
+    """Creates overlapped image combining:
+    1. Facemesh reconstruction
+    2. User's hand-drawn traces
+    3. Pencil sketch effect
+    """
+    # Ensure consistent sizing
+    base_size = facemesh_img.size
+    traced_img = traced_img.resize(base_size)
+    pencil_img = pencil_img.resize(base_size)
+    
+    # Landmark-based alignment for traces
+    if landmarks:
+        centroid_x = sum(point[0] for point in landmarks) / len(landmarks)
+        centroid_y = sum(point[1] for point in landmarks) / len(landmarks)
+        canvas_center_x = base_size[0] / 2
+        canvas_center_y = base_size[1] / 2
+        offset_x = int(canvas_center_x - centroid_x)
+        offset_y = int(canvas_center_y - centroid_y)
+        
+        aligned_trace = Image.new("RGBA", base_size, (0, 0, 0, 0))
+        aligned_trace.paste(traced_img, (offset_x, offset_y), traced_img)
+        traced_img = aligned_trace
+    
+    # Convert all components to RGBA
+    face_rgba = facemesh_img.convert("RGBA")
+    trace_rgba = traced_img.convert("RGBA")
+    pencil_rgba = pencil_img.convert("RGBA")
+    
+    # Create composite with custom blending
+    composite = Image.new("RGBA", base_size)
+    
+    # 1. Facemesh as base layer (100% opacity)
+    composite.paste(face_rgba, (0, 0))
+    
+    # 2. Hand-drawn traces overlay (70% opacity)
+    composite = Image.blend(
+        composite, 
+        Image.composite(trace_rgba, Image.new("RGBA", base_size, (0,0,0,0)), trace_rgba),
+        0.7
+    )
+    
+    # 3. Pencil sketch overlay (50% opacity)
+    composite = Image.blend(
+        composite,
+        pencil_rgba,
+        0.5
+    )
+    
+    return composite.convert("RGB")
+
+# ===== PENCIL SKETCH v1 =====
+def create_pencil_sketch_v1(original_img):
+    """
+    Creates pencil sketch effect directly from original image
+    using grayscale inversion and dodge blending
+    """
+    # Convert to OpenCV format
+    img_cv = pil_to_cv2(original_img)
+    
+    # Convert to grayscale
+    gray_img = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+    
+    # Invert and blur
+    inverted = 255 - gray_img
+    blurred = cv2.GaussianBlur(inverted, (21, 21), 0)
+    inverted_blurred = 255 - blurred
+    
+    # Color dodge blend
+    pencil_sketch = cv2.divide(gray_img, inverted_blurred, scale=256.0)
+    
+    return cv2_to_pil(pencil_sketch)
+
+
+
+
+
+# ===== ARTISTIC FILTERS =====
+def apply_watercolor_filter(img):
+    blurred = cv2.bilateralFilter(np.array(img), 15, 75, 75)
+    return cv2.stylization(blurred, sigma_s=60, sigma_r=0.6)
+
+def apply_pencil_sketch(img):
+    img_np = np.array(img)
+    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+    inverted = 255 - gray
+    blurred = cv2.GaussianBlur(inverted, (21, 21), 0)
+    sketch = cv2.divide(gray, 255 - blurred, scale=256)
+    return cv2.cvtColor(sketch, cv2.COLOR_GRAY2RGB)
+
+def apply_stippling_effect(img):
+    img_np = np.array(img)
+    small = cv2.resize(img_np, (100, 100), interpolation=cv2.INTER_NEAREST)
+    return cv2.resize(small, img_np.shape[:2][::-1], interpolation=cv2.INTER_NEAREST)
+
+def enhance_with_ai(image, strength=0.7):
+    """Apply AI-based enhancement to sketches"""
+    # Convert to OpenCV format
+    cv_img = np.array(image.convert("RGB"))
+    
+    # Use OpenCV's detailEnhance as the placeholder
+    enhanced = cv2.detailEnhance(cv_img, sigma_s=10, sigma_r=strength)
+    return Image.fromarray(enhanced)
+
+
+
+
+# ===== FACE RECONSTRUCTION =====
+# ===== FACE RECONSTRUCTION =====
+import random
+import math
+from PIL import Image, ImageDraw
+
+def reconstruct_face_from_mesh(landmarks, img_size, skin_tone=(255, 224, 189)):
+    if not landmarks or len(landmarks) < 478:
+        return Image.new("RGB", img_size, skin_tone)
+    
+    # Create PIL image and drawing context
+    face_img = Image.new("RGB", img_size, skin_tone)
+    draw = ImageDraw.Draw(face_img)
+    points = [(int(x), int(y)) for (x,y) in landmarks]
+    
+    # Define key facial features
+    FACE_CONTOUR = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 
+                    361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 
+                    176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 
+                    162, 21, 54, 103, 67, 109, 151]
+    
+    LEFT_EYE = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246]
+    RIGHT_EYE = [362, 398, 384, 385, 386, 387, 388, 466, 263, 249, 390, 373, 374, 380, 381, 382]
+    LIPS = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95]
+    NOSE_BRIDGE = [6, 197, 195, 5, 4, 1, 19, 94]
+    LEFT_NOSTRIL = [49, 59, 60, 48]
+    RIGHT_NOSTRIL = [279, 289, 290, 278]
+    LEFT_EYEBROW = [70, 63, 105, 66, 107, 55, 65, 52, 53, 46]
+    RIGHT_EYEBROW = [336, 296, 334, 293, 300, 276, 283, 282, 295, 285]
+    INNER_LIP_LINE = [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308, 324, 318, 402, 317, 14, 87, 88, 95]
+
+    # Helper function for point-in-polygon test
+    def point_in_polygon(point, polygon):
+        x, y = point
+        n = len(polygon)
+        inside = False
+        p1x, p1y = polygon[0]
+        for i in range(n+1):
+            p2x, p2y = polygon[i % n]
+            if y > min(p1y, p2y):
+                if y <= max(p1y, p2y):
+                    if x <= max(p1x, p2x):
+                        if p1y != p2y:
+                            xinters = (y-p1y)*(p2x-p1x)/(p2y-p1y) + p1x
+                        if p1x == p2x or x <= xinters:
+                            inside = not inside
+            p1x, p1y = p2x, p2y
+        return inside
+
+    # Enhanced contour drawing function
+    def draw_feature_contour(indices, color=(0, 0, 0), width=2):
+        feature_pts = [points[i] for i in indices]
+        if len(feature_pts) > 2:
+            # Draw closed polygon for solid features
+            draw.polygon(feature_pts, outline=color, width=width)
+        # Draw connected lines for contour features
+        for i in range(len(feature_pts)):
+            start_pt = feature_pts[i]
+            end_pt = feature_pts[(i+1) % len(feature_pts)]
+            draw.line([start_pt, end_pt], fill=color, width=width)
+
+    # Eyebrow drawing with gradient effect
+    def draw_eyebrow_strokes(eyebrow_indices, side='left'):
+        eyebrow_pts = [points[i] for i in eyebrow_indices]
+        eyebrow_polygon = eyebrow_pts + [eyebrow_pts[0]]
+        
+        # Calculate boundaries with padding
+        min_x = max(0, min(pt[0] for pt in eyebrow_pts) - 5)
+        max_x = min(img_size[0], max(pt[0] for pt in eyebrow_pts) + 5)
+        min_y = max(0, min(pt[1] for pt in eyebrow_pts) - 5)
+        max_y = min(img_size[1], max(pt[1] for pt in eyebrow_pts) + 5)
+        
+        # Gradient colors
+        INNER_COLOR = (220, 220, 220)  # Light grey
+        TAIL_COLOR = (80, 80, 80)      # Dark grey
+        inner_x = min_x if side == 'left' else max_x
+
+        # Draw 1500 strokes (adjust for density)
+        for _ in range(1500):
+            x = random.randint(int(min_x), int(max_x))
+            y = random.randint(int(min_y), int(max_y))
+            
+            if point_in_polygon((x, y), eyebrow_polygon):
+                # Calculate gradient position
+                pos_ratio = abs(x - inner_x) / (max_x - min_x)
+                base_color = tuple(
+                    int(INNER_COLOR[i] + pos_ratio * (TAIL_COLOR[i] - INNER_COLOR[i]))
+                    for i in range(3)
+                )
+                # Add natural color variation
+                brow_color = tuple(
+                    max(0, min(255, c + random.randint(-8, 8)))
+                    for c in base_color
+                )
+                
+                # Create straight stroke
+                start_x = x + random.randint(-2, 2)
+                start_y = y + random.randint(-2, 2)
+                angle = random.uniform(-0.3, 0.3)
+                length = random.randint(6, 12)
+                end_x = start_x + length * math.cos(angle)
+                end_y = start_y + length * math.sin(angle)
+                
+                # Draw straight line
+                draw.line([(start_x, start_y), (end_x, end_y)], 
+                          fill=brow_color, 
+                          width=1)
+    
+    # ==== MAIN DRAWING LOGIC ====
+    # Draw eyebrows
+    draw_eyebrow_strokes(LEFT_EYEBROW, 'left')
+    draw_eyebrow_strokes(RIGHT_EYEBROW, 'right')
+    
+    # Draw essential facial contours
+    draw_feature_contour(FACE_CONTOUR, color=(50, 50, 50), width=3)
+    draw_feature_contour(LEFT_EYE, color=(30, 30, 30), width=2)
+    draw_feature_contour(RIGHT_EYE, color=(30, 30, 30), width=2)
+    draw_feature_contour(LIPS, color=(40, 40, 40), width=2)
+    draw_feature_contour(NOSE_BRIDGE, color=(35, 35, 35), width=2)
+    
+    # Draw nostrils
+    draw_feature_contour(LEFT_NOSTRIL, color=(40, 40, 40), width=1)
+    draw_feature_contour(RIGHT_NOSTRIL, color=(40, 40, 40), width=1)
+    
+    # Draw line dividing upper and lower lips
+    draw_feature_contour(INNER_LIP_LINE, color=(20, 20, 20), width=1)
+    
+    return face_img
+
+
+
+
+
+
+    # 1. Face contour
+    contour_points = [points[i] for i in FACE_CONTOUR]
+    draw.line(contour_points + [contour_points[0]], fill="black", width=2)
+    
+    # 2. Eyes
+    left_eye_points = [points[i] for i in LEFT_EYE]
+    draw.line(left_eye_points + [left_eye_points[0]], fill="black", width=1)
+    right_eye_points = [points[i] for i in RIGHT_EYE]
+    draw.line(right_eye_points + [right_eye_points[0]], fill="black", width=1)
+    
+    # 3. Pupils
+    if len(landmarks) > 473:
+        draw.ellipse([(points[468][0]-4, points[468][1]-4), 
+                     (points[468][0]+4, points[468][1]+4)], fill="black")
+        draw.ellipse([(points[473][0]-4, points[473][1]-4), 
+                     (points[473][0]+4, points[473][1]+4)], fill="black")
+    
+    # 4. Lips
+    lip_points = [points[i] for i in LIPS]
+    draw.line(lip_points + [lip_points[0]], fill=(150, 0, 0), width=2)
+    
+    # 5. Nose with perfect symmetry
+    # Bridge
+    bridge_points = [points[i] for i in NOSE_BRIDGE]
+    for i in range(len(bridge_points)-1):
+        draw.line([bridge_points[i], bridge_points[i+1]], fill="black", width=1)
+    
+    # Nostrils - create symmetric shapes
+    left_nostril_points = [points[i] for i in LEFT_NOSTRIL]
+    right_nostril_points = [points[i] for i in RIGHT_NOSTRIL]
+    
+    # Mirror right nostril for perfect symmetry
+    midpoint_x = (points[49][0] + points[279][0]) / 2
+    mirrored_right_nostril = []
+    for x, y in right_nostril_points:
+        mirrored_x = midpoint_x - (x - midpoint_x)
+        mirrored_right_nostril.append((mirrored_x, y))
+    
+    # Apply vertical offset
+    vertical_offset = 3
+    left_nostril = [(x, y + vertical_offset) for (x,y) in left_nostril_points]
+    right_nostril = [(x, y + vertical_offset) for (x,y) in mirrored_right_nostril]
+    
+    # Draw nostrils
+    draw.line(left_nostril + [left_nostril[0]], fill="black", width=1)
+    draw.line(right_nostril + [right_nostril[0]], fill="black", width=1)
+    
+    # 6. Eyebrows
+    draw_eyebrow_strokes(LEFT_EYEBROW)
+    draw_eyebrow_strokes(RIGHT_EYEBROW)
+    
+    return face_img
+
+
+
+import mediapipe as mp
+# ===== FACE MESH SKETCH GENERATION =====
+def generate_face_mesh_sketch(landmarks, img_size):
+    """Generate pure face mesh sketch without fill"""
+    # Create blank white image
+    img = Image.new("RGB", img_size, (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    
+    if not landmarks or len(landmarks) < 478:
+        return img
+    
+    points = [(int(x), int(y)) for (x,y) in landmarks]
+    
+    # Get MediaPipe face mesh connections
+    connections = mp.solutions.face_mesh.FACEMESH_TESSELATION
+    
+    # Draw all connections
+    for connection in connections:
+        start_idx = connection[0]
+        end_idx = connection[1]
+        if start_idx < len(points) and end_idx < len(points):
+            start_point = points[start_idx]
+            end_point = points[end_idx]
+            draw.line([start_point, end_point], fill=(80, 80, 80), width=1)
+    
+    # Highlight key facial features
+    feature_indices = {
+        "eyes": [33, 133, 362, 263, 468, 473],
+        "lips": [61, 291, 308, 402, 14, 17, 84, 91],
+        "eyebrows": [70, 46, 336, 285]
+    }
+    
+    for feature, indices in feature_indices.items():
+        for idx in indices:
+            if idx < len(points):
+                x, y = points[idx]
+                draw.ellipse([(x-2, y-2), (x+2, y+2)], fill=(0, 0, 0))
+    
+    return img
+
+# ===== PRINT-READY OUTPUT =====
+PRINT_READY = (3300, 4200)  # 11x14" @ 300 PPI
+PROCREATE_READY = (2400, 3000)  # Digital art size
+
+def generate_print_ready_sketch(landmarks, original_img, skin_tone=(255, 224, 189)):
+    """Generates print-ready sketch maintaining aspect ratio"""
+    # Calculate target size with aspect ratio
+    aspect = original_img.width / original_img.height
+    target_height = 4200
+    target_width = int(target_height * aspect)
+    
+    # Scale landmarks proportionally
+    scale_x = target_width / original_img.width
+    scale_y = target_height / original_img.height
+    scaled_landmarks = [(x * scale_x, y * scale_y) for (x, y) in landmarks]
+    
+    # Create output image
+    return reconstruct_face_from_mesh(scaled_landmarks, (target_width, target_height), skin_tone)
+
+def generate_procreate_sketch(landmarks, original_img, skin_tone=(255, 224, 189)):
+    """Generates Procreate-optimized sketch at 2400x3000 resolution"""
+    # Calculate target size with aspect ratio
+    aspect = original_img.width / original_img.height
+    target_height = 3000
+    target_width = int(target_height * aspect)
+    
+    # Scale landmarks proportionally
+    scale_x = target_width / original_img.width
+    scale_y = target_height / original_img.height
+    scaled_landmarks = [(x * scale_x, y * scale_y) for (x, y) in landmarks]
+    
+    # Create output image
+    return reconstruct_face_from_mesh(scaled_landmarks, (target_width, target_height), skin_tone)
+
+
+
+# ===== FACE CHART GENERATION =====
+def generate_face_chart_art(traced_img, original_img, landmarks):
+    """Generates all four faces with triple-overlay for hand_drawn_v1"""
+    # 1. Facemesh reconstruction
+    reconstructed_face = reconstruct_face_from_mesh(
+        landmarks, 
+        original_img.size,
+        skin_tone=get_skin_tone()
+    )
+    
+    # 2. Pencil sketch from original image
+    pencil_sketch = create_pencil_sketch_v1(original_img)
+    
+    # 3. Create triple-overlay version
+    triple_overlay = create_triple_overlay(
+        reconstructed_face.copy(),
+        traced_img,
+        pencil_sketch.copy(),
+        landmarks
+    )
+    
+    # 4. Pure facemesh
+    face_mesh = generate_face_mesh_sketch(landmarks, original_img.size)
+    
+    return [reconstructed_face, triple_overlay, pencil_sketch, face_mesh]
+
+
+# ===== LANDMARK PROCESSING =====
+@st.cache_data(max_entries=3)
+def get_landmarks(pil_img):
+    cv_img = pil_to_cv2(pil_img)
+    img_height, img_width = cv_img.shape[:2]
+    landmarks = []
+    results = st.session_state.face_mesh.process(cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB))
+    if results.multi_face_landmarks:
+        for face_landmarks in results.multi_face_landmarks:
+            for lm in face_landmarks.landmark:
+                x = int(lm.x * img_width)
+                y = int(lm.y * img_height)
+                landmarks.append((x, y))
+    return landmarks
+
+# ===== UI STYLES =====
+st.markdown("""
+    <style>
+    @keyframes fadeInPage { from {opacity: 0;} to {opacity: 1;} }
+    .fade-in { animation: fadeInPage 0.6s ease-out; }
+    .feature-highlight { background-color: #fff5f7; border-left: 4px solid #d12a6a; padding: 0.5rem 1rem; margin: 1rem 0; }
+    </style>
+    <div class="fade-in">
+""", unsafe_allow_html=True)
+
+st.title(" BeautyBlend: Face Designer")
+st.markdown('<div class="feature-highlight">âœ¨ Export face charts to Procreate for advanced decoration!</div>', unsafe_allow_html=True)
+
+# ===== MODEL SELECTION =====
+st.sidebar.header("ðŸ§¬ Choose Your Model")
+gender = st.sidebar.selectbox("Gender", ["Female", "Male", "Androgynous"])
+st.sidebar.selectbox("Skin Tone", ["Fair", "Medium", "Olive", "Deep"], key='skin_tone')
+
+# ===== FACE IMAGE MAPPING =====
+face_map = {
+    ("Female", "Fair"): "faces/female_fair.png",
+    ("Female", "Medium"): "faces/female_medium.png",
+    ("Female", "Olive"): "faces/female_olive.png",
+    ("Female", "Deep"): "faces/female_deep.png",
+    ("Male", "Fair"): "faces/male_fair.png",
+    ("Male", "Medium"): "faces/male_medium.png",
+    ("Male", "Olive"): "faces/male_olive.png",
+    ("Male", "Deep"): "faces/male_deep.png",
+    ("Androgynous", "Fair"): "faces/androgynous_fair.png",
+    ("Androgynous", "Medium"): "faces/androgynous_medium.png",
+    ("Androgynous", "Olive"): "faces/androgynous_olive.png",
+    ("Androgynous", "Deep"): "faces/androgynous_deep.png",
+}
+
+# ===== FILE UPLOAD & BACKGROUND HANDLING =====
+def process_uploaded_image(uploaded_file):
+    """Processes uploaded image with face detection, zoom, and resizing"""
+    try:
+        # Save uploaded file
+        with open("user_upload.jpg", "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        
+        # Auto-zoom on small faces
+        zoomed_image = detect_and_zoom_face("user_upload.jpg", zoom_factor=1.8)
+        
+        # Resize to print-ready resolution
+        resized_image = cv2.resize(zoomed_image, PRINT_READY)
+        
+        # Save in print-ready format
+        cv2.imwrite("processed_face.jpg", resized_image, [cv2.IMWRITE_JPEG_QUALITY, 100])
+        
+        # Load and return processed image
+        return Image.open("processed_face.jpg").convert("RGBA")
+    
+    except Exception as e:
+        st.error(f"Error processing image: {str(e)}")
+        return None
+
+# Main upload handling
+uploaded_file = st.sidebar.file_uploader("🖼️ Upload Your Photo", 
+                                         type=["jpg", "jpeg", "png"],
+                                         accept_multiple_files=False,
+                                         key="file_uploader")
+
+if uploaded_file is not None:
+    if uploaded_file != st.session_state.get('prev_uploaded', None):
+        reset_canvas_state()
+        st.session_state.prev_uploaded = uploaded_file
+        st.session_state.canvas_counter += 1
+    
+    # Process uploaded image with face zoom and resize
+    bg_img = process_uploaded_image(uploaded_file)
+    if bg_img:
+        st.session_state.background_img = bg_img
+        st.sidebar.text(f"Processed size: {bg_img.width}x{bg_img.height}")
+    else:
+        st.session_state.background_img = None
+else:
+    # Load default face based on selected gender/skin tone
+    face_path = face_map.get((gender, st.session_state.skin_tone), "faces/female_medium.png")
+    if os.path.exists(face_path):
+        st.session_state.background_img = Image.open(face_path).convert("RGBA")
+    else:
+        st.error(f"Missing default face image: {face_path}")
+        st.session_state.background_img = None
+
+# Display resolution info if available
+if st.session_state.background_img:
+    img = st.session_state.background_img
+    st.sidebar.text(f"Final size: {img.width}x{img.height}")
+    
+    # Now this function is defined
+    if check_print_resolution(img, (11, 14)):
+        st.sidebar.success("✅ Ready for 11×14\" print (300 PPI)")
+
+
+# ===== LANDMARKS & MESH PROCESSING =====
+bg_img = st.session_state.background_img
+
+if bg_img is not None:
+    # Process landmarks if background image exists
+    st.session_state.landmarks = get_landmarks(bg_img)
+    landmarks = st.session_state.landmarks
+    st.sidebar.text(f"Landmarks detected: {len(landmarks) if landmarks else 0}")
+else:
+    landmarks = []
+
+# ===== SIDEBAR CONTROLS =====
+if bg_img is not None:
+    st.sidebar.subheader("Face Controls")
+    show_all_face_regions = st.sidebar.checkbox("Show All Face Regions", False)
+    draw_mesh = st.sidebar.checkbox("Show Face Mesh Overlay", True)
+    show_face_chart = st.sidebar.checkbox("Show Face Chart (Landmarks)", False)
+    
+    st.sidebar.subheader("Eyebrow Settings")
+    brow_density = st.sidebar.slider("Eyebrow Density", 1, 5, 3)
+    stroke_spacing = 6 - brow_density  # Convert density to spacing (1=5px, 5=1px)
+    
+    st.sidebar.subheader("Drawing Tools")
+    brush_options = {"Pencil": "round", "Calligraphy": "rect", "Airbrush": "circle", "Marker": "square"}
+    selected_brush = st.sidebar.selectbox("Brush Type", list(brush_options.keys()))
+    color = st.sidebar.color_picker("Brush Color", "#000000")
+    stroke_width = st.sidebar.slider("Brush Size", 2, 30, 6)
+    opacity = st.sidebar.slider("Opacity", 0.1, 1.0, 1.0, step=0.05)
+    
+    st.sidebar.subheader("Hand-Drawn Integration")
+    enable_blend = st.sidebar.checkbox("Blend Hand-Drawn", True, key="enable_drawing_blend")
+    if st.session_state.get('enable_drawing_blend', True):
+        blend_opacity = st.sidebar.slider("Drawing Opacity", 0.0, 1.0, 0.3)
+    
+    st.sidebar.subheader("AI Enhancement")
+    use_ai_enhancement = st.sidebar.checkbox(
+        "Enable AI Enhancement", 
+        value=True,
+        key='use_ai_enhancement'
+    )
+
+
+    st.sidebar.subheader("Face Mesh Connections")
+    show_tesselation = st.sidebar.checkbox("Full Mesh", True, key="tesselation")
+    show_contours = st.sidebar.checkbox("Face Contour", True, key="contours")
+    show_irises = st.sidebar.checkbox("Irises", True, key="irises")
+    show_lips = st.sidebar.checkbox("Lips", True, key="lips")
+    show_eyes = st.sidebar.checkbox("Eyes", True, key="eyes")
+    show_eyebrows = st.sidebar.checkbox("Eyebrows", True, key="eyebrows")
+    
+    
+    if st.session_state.use_ai_enhancement:
+        ai_strength = st.sidebar.slider("Enhancement Strength", 0.0, 1.0, 0.7, key='ai_strength')
+        st.session_state.use_real_ai = st.sidebar.checkbox(
+            "Use Real AI API", 
+            value=False,
+            help="Use real AI API for enhancement"
+        )
+
+# ===== CANVAS SETUP =====
+if bg_img is not None:
+    # Create composite image
+    composite_img = bg_img.copy()
+    
+    # Apply selected overlays - mutually exclusive options
+    if show_all_face_regions and landmarks:
+        composite_img = draw_all_face_regions(composite_img, landmarks)
+    elif draw_mesh:
+        # Build selected connections
+        connection_sets = []  # Properly defined here
+        if show_tesselation:
+            connection_sets.append(mp_face_mesh.FACEMESH_TESSELATION)
+        if show_contours:
+            connection_sets.append(mp_face_mesh.FACEMESH_CONTOURS)
+        if show_irises:
+            connection_sets.append(mp_face_mesh.FACEMESH_IRISES)
+        if show_lips:
+            connection_sets.append(mp_face_mesh.FACEMESH_LIPS)
+        if show_eyes:
+            connection_sets.append(mp_face_mesh.FACEMESH_LEFT_EYE)
+            connection_sets.append(mp_face_mesh.FACEMESH_RIGHT_EYE)
+        if show_eyebrows:
+            connection_sets.append(mp_face_mesh.FACEMESH_LEFT_EYEBROW)
+            connection_sets.append(mp_face_mesh.FACEMESH_RIGHT_EYEBROW)
+            
+        
+        composite_img = draw_face_mesh(composite_img, connection_sets)
+    elif show_face_chart and landmarks:
+        composite_img = draw_face_chart(composite_img, landmarks)
+    
+    # Set maximum display dimensions
+    MAX_DISPLAY = (800, 600)
+    composite_img.thumbnail(MAX_DISPLAY, Image.LANCZOS)
+    display_width, display_height = composite_img.size
+    
+    # Canvas setup
+    canvas_result = st_canvas(
+        fill_color=f"rgba(0,0,0,{opacity})",
+        stroke_width=stroke_width,
+        stroke_color=color,
+        background_image=composite_img,
+        height=display_height,
+        width=display_width,
+        drawing_mode="freedraw",
+        key=f"canvas_{st.session_state.canvas_counter}",
+        initial_drawing=st.session_state.canvas_data,
+        update_streamlit=True
+    )
+    
+    # ===== TRACE PROCESSING =====
+    if canvas_result.image_data is not None:
+        # Create transparent drawing layer
+        result = Image.fromarray(canvas_result.image_data.astype("uint8"))
+        transparent_bg = Image.new("RGBA", result.size, (0,0,0,0))
+        traced_only = Image.alpha_composite(transparent_bg, result.convert("RGBA"))
+        
+        # Display isolated drawing
+        st.image(traced_only, caption="Your Drawing (Isolated)", use_column_width=True)
+        
+        # Apply AI enhancement if enabled
+        if st.session_state.get('use_ai_enhancement', False):
+            enhanced_trace = enhance_with_ai(
+                traced_only, 
+                strength=st.session_state.get('ai_strength', 0.7)
+            )
+            st.image(enhanced_trace, caption="AI-Enhanced Drawing", use_column_width=True)
+        
+        # Blend with background if enabled
+        if st.session_state.get('enable_drawing_blend', True):
+            # Use original composite image for blending
+            blended = blend_drawing(
+                composite_img, 
+                traced_only, 
+                opacity=st.session_state.get('blend_opacity', 0.3)
+            )
+            st.image(blended, caption="Blended Result", use_column_width=True)
+            
+            # ==== EXPORT OPTIONS ====
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🖨️ Export for Printing"):
+                    print_sketch = generate_print_ready_sketch(
+                        landmarks,
+                        bg_img,
+                        get_skin_tone()
+                    )
+                    buf = io.BytesIO()
+                    print_sketch.save(buf, format="PNG", dpi=(300, 300))
+                    st.download_button(
+                        "Download Print-Ready",
+                        buf.getvalue(),
+                        "face_chart_print.png",
+                        "image/png"
+                    )
+                    
+            with col2:
+                if st.button("🎨 Export to Procreate"):
+                    procreate_sketch = generate_procreate_sketch(
+                        landmarks,
+                        bg_img,
+                        get_skin_tone()
+                    )
+                    buf = io.BytesIO()
+                    procreate_sketch.save(buf, format="PNG")
+                    st.download_button(
+                        "Download Procreate File",
+                        buf.getvalue(),
+                        "face_chart_procreate.png",
+                        "image/png"
+                    )
+
+
+
+        
+# ===== AI ART GENERATION =====
+if st.button("✨ Generate AI Art from Drawing", key="generate_art"):
+    st.cache_data.clear()
+    st.session_state.art_version += 1
+
+    # Ensure pencil sketch of bg is on white
+    pencil_sketch_bg = create_pencil_sketch_v1(bg_img)
+    # If the pencil sketch might have transparency, paste it on white
+    pencil_sketch_bg = pencil_sketch_bg.convert("RGB")
+    white_bg = Image.new("RGB", pencil_sketch_bg.size, (255, 255, 255))
+    pencil_sketch_bg = Image.composite(pencil_sketch_bg, white_bg, Image.new("L", pencil_sketch_bg.size, 255))
+
+    # Blended result: user tracing + pencil sketch background, on white
+    blended_result = blend_drawing(white_bg, pencil_sketch_bg, opacity=1.0)  # pencil sketch on white
+    blended_result = blend_drawing(blended_result, traced_only, opacity=0.5) # then overlay tracing
+
+    if landmarks:
+        with st.spinner("Creating art from your tracing..."):
+            art_versions = generate_face_chart_art(traced_only, bg_img, landmarks)
+            # Make sure all art_versions are on white
+            art_versions = [img.convert("RGB") for img in art_versions]
+            # Add the blended result as the fifth image
+            art_versions.append(blended_result)
+            styles = [
+                "Facemesh Reconstruction", 
+                "Triple Overlay (Facemesh + Hand-drawn + Pencil)", 
+                "Pencil Sketch Style", 
+                "Pure Facemesh",
+                "Blended Result"
+            ]
+    else:
+        st.warning("No facial landmarks detected - showing default faces")
+        default_img = Image.new("RGB", (512, 512), (255, 255, 255))
+        reconstructed = default_img.copy()
+        blended = blend_drawing(default_img, traced_only)
+        pencil = cv2_to_pil(apply_pencil_sketch(pil_to_cv2(default_img)))
+        facemesh = generate_face_mesh_sketch([], default_img.size)
+        # Make sure all fallback images are on white
+        reconstructed = reconstructed.convert("RGB")
+        blended = blended.convert("RGB")
+        pencil = pencil.convert("RGB")
+        facemesh = facemesh.convert("RGB")
+        art_versions = [reconstructed, blended, pencil, facemesh, blended_result]
+        styles = [
+            "Default Face", 
+            "Blended Drawing", 
+            "Pencil Sketch", 
+            "Facemesh",
+            "Blended Result"
+        ]
+
+    # Display and download all results
+    cols = st.columns(len(art_versions))
+    for col, art_img, style in zip(cols, art_versions, styles):
+        with col:
+            st.image(art_img, caption=f"{style} v{st.session_state.art_version}", use_column_width=True)
+            buf = io.BytesIO()
+            art_img.save(buf, format="PNG")
+            st.download_button(
+                f"💾 Download {style}",
+                buf.getvalue(),
+                f"beautyblend_{style.lower().replace(' ','_')}.png",
+                "image/png"
+            )
+
+
+    # Clear canvas button
+    if st.button("ðŸ§¹ Clear Canvas", key="clear_canvas"):
+        reset_canvas_state()
+        st.session_state.canvas_counter += 1
+        st.rerun()
+else:
+    st.info("Please upload an image or select a model to begin")
+
+
+#========== EXPORRT PRINTING
+if st.button("ðŸ’¾ Export for Printing"):
+    if landmarks:
+        print_sketch = generate_print_ready_sketch(landmarks, get_skin_tone())
+        buf = io.BytesIO()
+        print_sketch.save(buf, format="PNG", dpi=(300, 300))
+        st.download_button(
+            "Download Print-Ready Sketch (3300x4200)",
+            buf.getvalue(),
+            "face_sketch_print.png",
+            "image/png"
+        )
+
+if st.button("ðŸ’¾ Export for Procreate"):
+    if landmarks:
+        procreate_sketch = generate_procreate_sketch(landmarks, get_skin_tone())
+        buf = io.BytesIO()
+        procreate_sketch.save(buf, format="PNG")
+        st.download_button(
+            "Download Procreate Sketch (2400x3000)",
+            buf.getvalue(),
+            "face_sketch_procreate.png",
+            "image/png"
+        )

@@ -1,0 +1,113 @@
+import streamlit as st
+import base64
+import os
+
+def apply_beautyblend_theme(bg_image_path=None):
+    st.set_page_config(page_title="BeautyBlend", layout="wide")
+
+    background = ""
+    if bg_image_path and os.path.exists(bg_image_path):
+        with open(bg_image_path, "rb") as f:
+            bg_base64 = base64.b64encode(f.read()).decode()
+            background = f"""
+            background-image: url("data:image/png;base64,{bg_base64}");
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            background-repeat: no-repeat;
+            """
+
+    st.markdown(f"""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Poppins:wght@400&display=swap');
+
+    .stApp {{
+        font-family: 'Poppins', sans-serif;
+        {background}
+        color: #222;
+    }}
+
+    h1, h2, h3 {{
+        font-family: 'Cinzel Decorative', cursive;
+        color: #d12a6a;
+        font-weight: 700;
+    }}
+
+    .block-container {{
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }}
+
+    /* Sidebar customization */
+    section[data-testid="stSidebar"] {{
+        background-color: rgba(255, 228, 235, 0.85);
+        backdrop-filter: blur(12px);
+        border-top-right-radius: 16px;
+        border-bottom-right-radius: 16px;
+        box-shadow: 2px 0 12px rgba(0, 0, 0, 0.1);
+    }}
+
+    section[data-testid="stSidebar"] .css-1v0mbdj,
+    section[data-testid="stSidebar"] .css-1aumxhk {{
+        color: #7a1c3a;
+        font-family: 'Poppins', sans-serif;
+    }}
+
+    /* Make all top-level containers use glasscard effect */
+    main .block-container > div {{
+        background: rgba(255, 255, 255, 0.25);
+        backdrop-filter: blur(14px);
+        border-radius: 20px;
+        padding: 2rem;
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+        margin-bottom: 2rem;
+    }}
+    </style>
+    """, unsafe_allow_html=True)
+
+def face_designer_nav(current_page="Face Chart Sketch"):
+    tabs = {
+        "Face Chart Sketch": (" Face Chart Sketch", "pages/1_Face_Designer.py"),
+        "Draw Face You Want": (" Draw Face You Want", "pages/2_Face_Draw.py"),
+        "Face Mesh Editor": (" Face Mesh Editor", "pages/3_Face_Mesh_Editor.py"),
+        "Makeup and Design": (" Makeup & Design", "pages/4_Face_Makeup.py")
+    }
+
+    st.markdown("""
+    <style>
+    .glass-card {
+        height: 130px;
+        background: rgba(255, 255, 255, 0.35);
+        backdrop-filter: blur(16px);
+        border-radius: 16px;
+        padding: 1rem;
+        text-align: center;
+        color: #222 !important;
+        font-weight: 700;
+        font-size: 16px;
+        box-shadow: 0 8px 20px rgba(0,0,0,0.1);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: 0.3s ease;
+    }
+    .glass-card:hover {
+        background: rgba(255, 255, 255, 0.45);
+        transform: scale(1.02);
+        cursor: pointer;
+    }
+    .glass-card.active {
+        background: #d12a6a;
+        color: white !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    cols = st.columns(len(tabs))
+    for i, (key, (label, path)) in enumerate(tabs.items()):
+        with cols[i]:
+            if key == current_page:
+                st.markdown(f'<div class="glass-card active">{label}</div>', unsafe_allow_html=True)
+            else:
+                if st.button(label, key=f"card_{key}"):
+                    st.switch_page(path)

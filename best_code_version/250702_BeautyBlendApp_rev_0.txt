@@ -1,0 +1,249 @@
+import streamlit as st
+import base64
+
+# --- Page Config ---
+st.set_page_config(page_title="BeautyBlend", layout="wide")
+
+# --- Hide Sidebar Nav ---
+st.markdown("""
+    <style>
+    section[data-testid="stSidebarNav"] {
+        display: none !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+
+# --- Initialize Session State ---
+for key in ["show_who", "show_intro", "show_find", "user_page"]:
+    if key not in st.session_state:
+        st.session_state[key] = False
+st.session_state.user_page = st.session_state.user_page or ""
+
+# --- Load Background Image ---
+def get_base64_image(image_path):
+    with open(image_path, "rb") as f:
+        return base64.b64encode(f.read()).decode()
+
+bg_image = get_base64_image("A_digital_painting_in_an_abstract_style_with_cubis.png")
+
+# --- Inject Custom CSS ---
+st.markdown(
+    f"""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Poppins:wght@400&display=swap');
+
+    html, body, .stApp {{
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        background-image: url("data:image/png;base64,{bg_image}");
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+    }}
+
+    .center-content {{
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        overflow: hidden;
+    }}
+
+    .glass-box {{
+        background: rgba(255, 255, 255, 0.2);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        border-radius: 20px;
+        padding: 3rem 2rem;
+        text-align: center;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        max-width: 900px;
+        width: 95%;
+        margin: 3rem auto;
+        animation: fadeInCard 1.5s ease-out;
+    }}
+
+    .role-card {{
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 16px;
+        padding: 1rem;
+        text-align: center;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+        transition: transform 0.3s ease;
+    }}
+
+    .role-card:hover {{
+        transform: scale(1.02);
+    }}
+
+    .role-title {{
+        font-family: 'Cinzel Decorative', serif;
+        font-size: 24px;
+        color: white;
+        margin-top: 0.5rem;
+    }}
+
+    .role-image {{
+        border-radius: 12px;
+        width: 100%;
+        max-height: 200px;
+        object-fit: cover;
+    }}
+
+    .title {{
+        font-family: 'Cinzel Decorative', cursive;
+        font-size: 64px;
+        color: white;
+        font-weight: bold;
+        text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.4);
+        margin-bottom: 1rem;
+    }}
+
+    .subtitle {{
+        font-family: 'Poppins', sans-serif;
+        font-size: 20px;
+        color: white;
+        text-shadow: 1px 1px 4px rgba(0, 0, 0, 0.3);
+        margin-bottom: 2rem;
+    }}
+
+    .stButton>button {{
+        background-color: #ffffffcc;
+        color: #000;
+        font-family: 'Poppins', sans-serif;
+        padding: 0.6rem 1.4rem;
+        font-size: 16px;
+        border-radius: 10px;
+        border: none;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        transition: 0.3s ease;
+    }}
+
+    .stButton>button:hover {{
+        background-color: #f0f0f0;
+        color: #000;
+    }}
+
+    @keyframes fadeInCard {{
+        from {{ opacity: 0; transform: translateY(30px); }}
+        to {{ opacity: 1; transform: translateY(0); }}
+    }}
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# --- Layout ---
+st.markdown('<div class="center-content">', unsafe_allow_html=True)
+st.markdown('<div class="glass-box">', unsafe_allow_html=True)
+st.markdown('<div class="title">BeautyBlend</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">Where digital makeup designs come to life</div>', unsafe_allow_html=True)
+
+# --- Navigation Buttons ---
+cols = st.columns(4)
+
+with cols[0]:
+    if st.button("Who Are You?"):
+        st.session_state.show_who = True
+        st.session_state.show_intro = False
+        st.session_state.show_find = False
+        st.session_state.user_page = ""
+
+with cols[1]:
+    if st.button("Enter the Gallery"):
+        st.session_state.show_who = False
+        st.session_state.show_intro = False
+        st.session_state.show_find = False
+        st.session_state.user_page = ""
+        st.success("Gallery will open soon!")
+
+with cols[2]:
+    if st.button("🔍 Find An Artist"):
+        st.session_state.show_who = False
+        st.session_state.show_intro = False
+        st.session_state.show_find = True
+        st.session_state.user_page = ""
+
+with cols[3]:
+    if st.button("About BeautyBlend"):
+        st.session_state.show_who = False
+        st.session_state.show_intro = True
+        st.session_state.show_find = False
+        st.session_state.user_page = ""
+
+st.markdown("</div>", unsafe_allow_html=True)
+
+# --- Who Are You Section ---
+if st.session_state.show_who:
+    st.markdown('<div class="glass-box">', unsafe_allow_html=True)
+    st.markdown('<div class="title">Who Are You?</div>', unsafe_allow_html=True)
+
+    role_cols = st.columns(3)
+    with role_cols[0]:
+        if st.button("Select Makeup Artist"):
+            st.session_state.user_page = "Makeup Artist"
+        st.image("makeup_artist_card.png", use_column_width=True)
+        st.markdown('<div class="role-title">Makeup Artist</div>', unsafe_allow_html=True)
+
+    with role_cols[1]:
+        if st.button("Select Face Designer"):
+            st.switch_page("pages/1_Face_Designer.py")
+        st.image("face_designer_card.png", use_column_width=True)
+        st.markdown('<div class="role-title">Face Designer</div>', unsafe_allow_html=True)
+
+    with role_cols[2]:
+        if st.button("Select Art Explorer"):
+            st.session_state.user_page = "I just want to engage with the art"
+        st.image("art_lover_card.png", use_column_width=True)
+        st.markdown('<div class="role-title">I just want to engage with the art</div>', unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# --- Art Lover Visual Card ---
+if st.session_state.user_page == "I just want to engage with the art":
+    st.image("A_semi-realistic_digital_painting_features_a_portr.png", use_column_width=True)
+    st.markdown("""
+    <div class="glass-box">
+        <div class="title">I just want to engage with the art</div>
+        <div class="subtitle">
+            Discover makeup as a form of visual poetry. From gallery browsing to tutorial watching — feel free to explore, observe, and be moved.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+# --- About BeautyBlend Section ---
+if st.session_state.show_intro:
+    bg_image_base64 = get_base64_image("introduction_BeautyBlend.jpg")
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            background-image: url("data:image/png;base64,{bg_image_base64}");
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            animation: fadeInBg 1.5s ease-in-out forwards;
+        }}
+        </style>
+        <div class="glass-box">
+            <div class="title">BeautyBlend</div>
+            <div class="subtitle">
+                Born from a personal journey through the world of beauty, this platform invites creatives — from face designers to professional makeup artists — to collaborate, inspire, and bring visual poetry to life.<br><br>
+                Designers and dreamers can explore imaginative makeup ideas digitally, while artists bring those visions to life through their craft. Together, they form a living gallery — one that celebrates bold expression, individuality, and the magic of transformation.
+            </div>
+            <div class="subtitle" style="font-style: italic;">“Art is not what you see, but what you make others see.” — Edgar Degas</div>
+            <div class="subtitle">Created with intention and love by Nikki.</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+
+
+

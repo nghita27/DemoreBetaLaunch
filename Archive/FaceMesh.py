@@ -1,0 +1,1132 @@
+import streamlit as st
+from PIL import Image, ImageDraw, ImageFilter
+import numpy as np
+import mediapipe as mp
+from streamlit_drawable_canvas import st_canvas
+import math
+from io import BytesIO
+from scipy.spatial import ConvexHull
+from PIL import Image, ImageDraw, ImageEnhance, ImageOps, ImageChops
+import cv2
+import numpy as np
+import mediapipe as mp
+from scipy.spatial import Delaunay, ConvexHull
+import math
+import random
+
+
+
+from beautyblend_theme import apply_beautyblend_theme, face_designer_nav
+
+apply_beautyblend_theme("")
+
+face_designer_nav("Fun Face Editor")
+from Security.face_sketch_db import save_face_sketch, load_user_sketches, delete_sketch
+
+
+#============LOG IN/ REGISTER
+from beautyblend_theme import apply_beautyblend_theme, face_designer_nav
+import sqlite3
+import os
+
+
+##===========LOG IN
+from Security.auth_db import (
+    register_user,
+    verify_user_credentials,
+    send_password_reset_email,
+    update_remember_me
+)
+
+# ========== UNIVERSAL LOGIN BLOCK ==========
+if "auth_status" not in st.session_state:
+    st.session_state["auth_status"] = False
+    st.session_state["user_id"] = None
+    st.session_state["username"] = None
+    st.session_state["remember_me"] = False
+
+    # Try auto-login from remember_me
+    conn = sqlite3.connect("portfolio.db")
+    c = conn.cursor()
+    c.execute("SELECT id, username FROM users WHERE remember_me = 1 LIMIT 1")
+    row = c.fetchone()
+    conn.close()
+    if row:
+        st.session_state["auth_status"] = True
+        st.session_state["user_id"] = row[0]
+        st.session_state["username"] = row[1]
+        st.session_state["remember_me"] = True
+
+# === TOP-RIGHT ACCOUNT SELECTOR ===
+col1, col2 = st.columns([8, 1])
+with col2:
+    if st.session_state["auth_status"]:
+        account_action = st.selectbox(
+            "Account",
+            ["", "Logout"],
+            format_func=lambda x: "Account" if x == "" else x,
+            key="account_action_face"
+        )
+    else:
+        account_action = st.selectbox(
+            "Account",
+            ["", "Log in", "Register", "Forgot Password"],
+            format_func=lambda x: "Account" if x == "" else x,
+            key="account_action_face"
+        )
+
+# === ACCOUNT LOGIC ===
+if account_action == "Log in":
+    with st.form("login_form_face"):
+        st.subheader("Log In")
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        remember = st.checkbox("Remember me")
+        submit = st.form_submit_button("Log In")
+
+        if submit:
+            user_id = verify_user_credentials(username, password)
+            if user_id:
+                st.session_state["auth_status"] = True
+                st.session_state["user_id"] = user_id
+                st.session_state["username"] = username
+                st.session_state["remember_me"] = remember
+                update_remember_me(user_id, remember)
+
+                from utils.profile import load_user_profile
+                st.session_state["profile"] = load_user_profile(user_id)
+
+                st.success(f"Welcome back, {username}!")
+                st.rerun()
+            else:
+                st.error("Incorrect username or password.")
+
+
+elif account_action == "Register":
+    with st.form("register_form_face"):
+        st.subheader("📝 Register")
+        st.info("Please memorize your Username.")
+        new_username = st.text_input("Username")
+        new_email = st.text_input("Email")
+        new_password = st.text_input("Password", type="password")
+        submit = st.form_submit_button("Register")
+
+        if submit:
+            import sqlite3, random
+            conn = sqlite3.connect("portfolio.db")
+            c = conn.cursor()
+
+            # Check email
+            c.execute("SELECT 1 FROM users WHERE email = ?", (new_email,))
+            email_exists = c.fetchone() is not None
+
+            # Check username
+            c.execute("SELECT 1 FROM users WHERE username = ?", (new_username,))
+            username_exists = c.fetchone() is not None
+
+            if email_exists:
+                st.error("❌ This email is already registered.")
+                st.info("💡 You can use 'Forgot Password' to reset your password.")
+            elif username_exists:
+                st.error("❌ Username is already taken. Please choose another one.")
+                
+                # Suggest alternative usernames
+                suggestions = []
+                base_name = new_username.strip().replace(" ", "_")
+
+                for _ in range(5):
+                    candidate = f"{base_name}{random.randint(10, 999)}"
+                    c.execute("SELECT 1 FROM users WHERE username = ?", (candidate,))
+                    if not c.fetchone():
+                        suggestions.append(candidate)
+                        if len(suggestions) >= 3:
+                            break
+
+                if suggestions:
+                    st.info("💡 Try these usernames instead:")
+                    for s in suggestions:
+                        st.markdown(f"- **{s}**")
+            else:
+                # Register new account
+                from Security.auth_db import register_user
+                if register_user(new_username, new_email, new_password):
+                    st.success("✅ Registration successful! Please log in.")
+                else:
+                    st.error("❌ Registration failed. Please try again later.")
+
+            conn.close()
+
+elif account_action == "Forgot Password":
+    with st.form("forgot_form_face"):
+        st.subheader("Forgot Password")
+        email = st.text_input("Enter your registered email")
+        submit = st.form_submit_button("Send Reset Link")
+
+        if submit:
+            if send_password_reset_email(email):
+                st.success("Reset link sent! Please check your inbox.")
+            else:
+                st.error("Email not found.")
+
+elif account_action == "Logout":
+    update_remember_me(st.session_state.get("user_id"), False)
+    st.session_state["auth_status"] = False
+    st.session_state["user_id"] = None
+    st.session_state["username"] = None
+    st.session_state["remember_me"] = False
+    st.session_state["profile"] = {}
+    st.success("Logged out.")
+    st.rerun()
+
+if st.session_state["auth_status"]:
+    st.markdown(f"<div style='text-align:right;'>👋 Welcome, <b>{st.session_state['username']}</b></div>", unsafe_allow_html=True)
+else:
+    st.info("You're viewing as a guest. Log in to save your face designs.")
+
+
+#===========================
+
+
+# --- Face Shape Classification & Reference Templates ---
+FACE_CONTOUR = [
+    10, 338, 297, 332, 284, 251, 389, 356, 454, 323,
+    361, 288, 397, 365, 379, 378, 400, 377, 152, 148,
+    176, 149, 150, 136, 172, 58, 132, 93, 234, 127,
+    162, 21, 54, 103, 67, 109, 151, 10
+]
+LEFT_EYE = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246]
+RIGHT_EYE = [362, 398, 384, 385, 386, 387, 388, 466, 263, 249, 390, 373, 374, 380, 381, 382]
+EYES = LEFT_EYE + RIGHT_EYE
+NOSE = [168, 197, 5, 4, 1, 19, 94, 2]
+LEFT_NOSTRIL = [49, 59, 60, 48]
+RIGHT_NOSTRIL = [279, 289, 290, 278]
+NOSTRILS = LEFT_NOSTRIL + RIGHT_NOSTRIL
+LIPS = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95]
+
+def create_pencil_sketch_background(img):
+    gray_img = img.convert('L')
+    edge_img = gray_img.filter(ImageFilter.FIND_EDGES)
+    inverted = Image.eval(edge_img, lambda x: 255 - x)
+    light_grey_bg = inverted.point(lambda x: x * 0.5 + 100)
+    return light_grey_bg.convert('RGB')
+
+
+def classify_face_shape(points):
+    contour = [points[i] for i in FACE_CONTOUR if i < len(points)]
+    if not contour:
+        return "Unknown"
+    xs = [x for x, y in contour]
+    ys = [y for x, y in contour]
+    width = max(xs) - min(xs)
+    height = max(ys) - min(ys)
+    if height == 0:
+        return "Unknown"
+    aspect_ratio = width / height
+    jaw_width = np.linalg.norm(np.array(contour[0]) - np.array(contour[len(contour)//2]))
+    cheekbone_width = np.linalg.norm(np.array(contour[8]) - np.array(contour[24]))
+    chin_y = min(ys)
+    forehead_y = max(ys)
+    if aspect_ratio > 1.1 and cheekbone_width > jaw_width * 1.1 and (forehead_y - chin_y) > height * 0.6:
+        return "Heart"
+    if 0.9 < aspect_ratio < 1.1:
+        return "Round"
+    elif aspect_ratio < 0.9:
+        return "Oblong"
+    elif aspect_ratio > 1.1:
+        return "Square"
+    return "Unknown"
+
+def detect_and_zoom_face(pil_img, zoom_factor=1.8, min_size=100):
+    import cv2
+    mp_face_detection = mp.solutions.face_detection
+    img_cv = cv2.cvtColor(np.array(pil_img.convert("RGB")), cv2.COLOR_RGB2BGR)
+    h, w, _ = img_cv.shape
+    face_detection = mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5)
+    results = face_detection.process(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
+    if results.detections:
+        bbox = results.detections[0].location_data.relative_bounding_box
+        x = int(bbox.xmin * w)
+        y = int(bbox.ymin * h)
+        width = int(bbox.width * w)
+        height = int(bbox.height * h)
+        padding_x = int(width * 0.2)
+        padding_y = int(height * 0.2)
+        x1 = max(0, x - padding_x)
+        y1 = max(0, y - padding_y)
+        x2 = min(w, x + width + padding_x)
+        y2 = min(h, y + height + padding_y)
+        new_width = int((x2 - x1) * zoom_factor)
+        new_height = int((y2 - y1) * zoom_factor)
+        center_x = (x1 + x2) // 2
+        center_y = (y1 + y2) // 2
+        zoom_x1 = max(0, center_x - new_width // 2)
+        zoom_y1 = max(0, center_y - new_height // 2)
+        zoom_x2 = min(w, center_x + new_width // 2)
+        zoom_y2 = min(h, center_y + new_height // 2)
+        if (zoom_x2 - zoom_x1) < min_size or (zoom_y2 - zoom_y1) < min_size:
+            return pil_img
+        zoomed = img_cv[zoom_y1:zoom_y2, zoom_x1:zoom_x2]
+        zoomed_pil = Image.fromarray(cv2.cvtColor(cv2.resize(zoomed, (w, h)), cv2.COLOR_BGR2RGB))
+        return zoomed_pil
+    return pil_img
+
+def get_template_offsets(face_type, contour_pts):
+    n = len(contour_pts)
+    offsets = [(0, 0)] * n
+    if face_type == "Round":
+        cx = sum(x for x, y in contour_pts) / n
+        cy = sum(y for x, y in contour_pts) / n
+        avg_radius = sum(math.hypot(x-cx, y-cy) for x, y in contour_pts) / n
+        offsets = []
+        for x, y in contour_pts:
+            angle = math.atan2(y-cy, x-cx)
+            new_x = cx + avg_radius * math.cos(angle)
+            new_y = cy + avg_radius * math.sin(angle)
+            offsets.append((new_x - x, new_y - y))
+    elif face_type == "Square":
+        xs = [x for x, y in contour_pts]
+        ys = [y for x, y in contour_pts]
+        cx = sum(xs) / n
+        cy = sum(ys) / n
+        width = max(xs) - min(xs)
+        height = max(ys) - min(ys)
+        offsets = []
+        for i, (x, y) in enumerate(contour_pts):
+            fx = (x - cx) / width
+            fy = (y - cy) / height
+            if abs(fx) > 0.7 or abs(fy) > 0.7:
+                new_x = x + (fx * 0.18 * width)
+                new_y = y + (fy * 0.08 * height)
+            else:
+                new_x = x
+                new_y = y
+            offsets.append((new_x - x, new_y - y))
+    elif face_type == "Oblong":
+        cx = sum(x for x, y in contour_pts) / n
+        cy = sum(y for x, y in contour_pts) / n
+        offsets = []
+        for x, y in contour_pts:
+            new_y = cy + 1.18 * (y - cy)
+            offsets.append((0, new_y - y))
+    elif face_type == "Heart":
+        xs = [x for x, y in contour_pts]
+        ys = [y for x, y in contour_pts]
+        cx = sum(xs) / n
+        cy = sum(ys) / n
+        top = max(ys)
+        bottom = min(ys)
+        offsets = []
+        for i, (x, y) in enumerate(contour_pts):
+            rel_y = (y - bottom) / (top - bottom + 1e-6)
+            if rel_y > 0.66:
+                new_x = x + (x - cx) * 0.13
+                new_y = y
+            elif 0.33 < rel_y <= 0.66:
+                new_x = x + (x - cx) * 0.10
+                new_y = y
+            else:
+                new_x = x - (x - cx) * 0.18
+                new_y = y + (rel_y - 0.33) * 10
+            offsets.append((new_x - x, new_y - y))
+    elif face_type == "Triangle":
+        xs = [x for x, y in contour_pts]
+        ys = [y for x, y in contour_pts]
+        cx = sum(xs) / n
+        cy = sum(ys) / n
+        top = max(ys)
+        bottom = min(ys)
+        offsets = []
+        chin_factor = 0.07  # slightly bigger chin area
+        for i, (x, y) in enumerate(contour_pts):
+            rel_y = (y - bottom) / (top - bottom + 1e-6)
+            if rel_y < chin_factor:
+                # Make chin very pointed and pulled down
+                new_x = cx + (x - cx) * 0.01  # almost centered x (super sharp)
+                new_y = y + (chin_factor - rel_y) * 100  # much sharper downward for long, pointy chin
+            elif rel_y < 0.33:
+                # Jaw: fairly narrow and tall to accentuate triangle
+                jaw_ratio = (rel_y - chin_factor) / (0.33 - chin_factor + 1e-6)
+                new_x = cx + (x - cx) * (0.25 + 0.4 * jaw_ratio)
+                new_y = y + (0.33 - rel_y) * 8
+            elif rel_y < 0.66:
+                # Cheek: normal width, rising toward forehead
+                new_x = x
+                new_y = y
+            else:
+                # Forehead: slightly narrower, but not too narrow
+                new_x = cx + (x - cx) * 0.90
+                new_y = y
+            offsets.append((new_x - x, new_y - y))
+    elif face_type == "Rectangle":
+        xs = [x for x, y in contour_pts]
+        ys = [y for x, y in contour_pts]
+        cx = sum(xs) / n
+        cy = sum(ys) / n
+        top = max(ys)
+        bottom = min(ys)
+        width = max(xs) - min(xs)
+        offsets = []
+        for (x, y) in contour_pts:
+            rel_y = (y - bottom) / (top - bottom + 1e-6)
+            if rel_y < 0.10 or rel_y > 0.90:
+                new_x = x
+                new_y = y
+            else:
+                new_x = cx + (x - cx) * 1.10
+                new_y = y
+            # Add vertical elongation for rectangle
+            new_y = cy + (new_y - cy) * 1.12
+            offsets.append((new_x - x, new_y - y))
+    elif face_type == "A-Triangle":
+        xs = [x for x, y in contour_pts]
+        ys = [y for x, y in contour_pts]
+        cx = sum(xs) / n
+        cy = sum(ys) / n
+        top = max(ys)
+        bottom = min(ys)
+        offsets = []
+        for (x, y) in contour_pts:
+            rel_y = (y - bottom) / (top - bottom + 1e-6)
+            if rel_y < 0.17:
+                new_x = cx + (x - cx) * 1.16
+                new_y = y
+            elif rel_y < 0.4:
+                new_x = cx + (x - cx) * (1.10 + 0.05 * (rel_y - 0.17) / 0.23)
+                new_y = y
+            elif rel_y > 0.73:
+                new_x = cx + (x - cx) * 0.90
+                new_y = y
+            else:
+                new_x = x
+                new_y = y
+            offsets.append((new_x - x, new_y - y))
+    elif face_type == "Diamond":
+        xs = [x for x, y in contour_pts]
+        ys = [y for x, y in contour_pts]
+        cx = sum(xs) / n
+        cy = sum(ys) / n
+        top = max(ys)
+        bottom = min(ys)
+        offsets = []
+        for (x, y) in contour_pts:
+            rel_y = (y - bottom) / (top - bottom + 1e-6)
+            if 0.30 < rel_y < 0.70:
+                new_x = cx + (x - cx) * 1.18
+                new_y = y
+            elif rel_y < 0.16 or rel_y > 0.84:
+                new_x = cx + (x - cx) * 0.90
+                new_y = y
+            else:
+                new_x = x
+                new_y = y
+            offsets.append((new_x - x, new_y - y))
+    elif face_type == "Oval":
+        cx = sum(x for x, y in contour_pts) / n
+        cy = sum(y for x, y in contour_pts) / n
+        avg_radius_x = sum(abs(x - cx) for x, y in contour_pts) / n
+        avg_radius_y = sum(abs(y - cy) for x, y in contour_pts) / n
+        offsets = []
+        for (x, y) in contour_pts:
+            angle = math.atan2(y - cy, x - cx)
+            ellipse_x = cx + avg_radius_x * 1.04 * math.cos(angle)
+            ellipse_y = cy + avg_radius_y * 1.17 * math.sin(angle)
+            offsets.append((ellipse_x - x, ellipse_y - y))
+    else:
+        offsets = [(0, 0)] * n
+    return offsets
+
+
+def morph_face_shape(points, face_type):
+    contour_indices = FACE_CONTOUR
+    contour_pts = [points[i] for i in contour_indices if i < len(points)]
+    if not contour_pts:
+        return points
+    offsets = get_template_offsets(face_type, contour_pts)
+    new_points = points.copy()
+    for idx, i in enumerate(contour_indices):
+        if i < len(points):
+            ox, oy = offsets[idx]
+            new_points[i] = (int(points[i][0] + ox), int(points[i][1] + oy))
+    return new_points
+
+def apply_scales_and_translations(
+    points,
+    face_x_scale, face_y_scale, face_x_trans, face_y_trans,
+    eyes_x_scale, eyes_y_scale, eyes_x_trans, eyes_y_trans,
+    nose_x_scale, nose_y_scale, nose_x_trans, nose_y_trans,
+    nostrils_x_scale, nostrils_y_scale, nostrils_x_trans, nostrils_y_trans,
+    lips_x_scale, lips_y_scale, lips_x_trans, lips_y_trans
+):
+    xs = [x for x, y in points]
+    ys = [y for x, y in points]
+    cx = sum(xs) / len(xs)
+    cy = sum(ys) / len(ys)
+
+    # Face
+    scaled = []
+    for (x, y) in points:
+        new_x = cx + (x - cx) * face_x_scale + face_x_trans
+        new_y = cy + (y - cy) * face_y_scale + face_y_trans
+        scaled.append((new_x, new_y))
+
+    # Eyes
+    eyes_pts = [scaled[i] for i in EYES if i < len(scaled)]
+    if eyes_pts:
+        ex = sum(x for x, y in eyes_pts) / len(eyes_pts)
+        ey = sum(y for x, y in eyes_pts) / len(eyes_pts)
+        for idx in EYES:
+            if idx < len(scaled):
+                x, y = scaled[idx]
+                scaled[idx] = (
+                    ex + (x - ex) * eyes_x_scale + eyes_x_trans,
+                    ey + (y - ey) * eyes_y_scale + eyes_y_trans
+                )
+    # Nose
+    nose_pts = [scaled[i] for i in NOSE if i < len(scaled)]
+    if nose_pts:
+        nx = sum(x for x, y in nose_pts) / len(nose_pts)
+        ny = sum(y for x, y in nose_pts) / len(nose_pts)
+        for idx in NOSE:
+            if idx < len(scaled):
+                x, y = scaled[idx]
+                scaled[idx] = (
+                    nx + (x - nx) * nose_x_scale + nose_x_trans,
+                    ny + (y - ny) * nose_y_scale + nose_y_trans
+                )
+    # Nostrils
+    nostrils_pts = [scaled[i] for i in NOSTRILS if i < len(scaled)]
+    if nostrils_pts:
+        nx = sum(x for x, y in nostrils_pts) / len(nostrils_pts)
+        ny = sum(y for x, y in nostrils_pts) / len(nostrils_pts)
+        for idx in NOSTRILS:
+            if idx < len(scaled):
+                x, y = scaled[idx]
+                scaled[idx] = (
+                    nx + (x - nx) * nostrils_x_scale + nostrils_x_trans,
+                    ny + (y - ny) * nostrils_y_scale + nostrils_y_trans
+                )
+    # Lips
+    lips_pts = [scaled[i] for i in LIPS if i < len(scaled)]
+    if lips_pts:
+        lx = sum(x for x, y in lips_pts) / len(lips_pts)
+        ly = sum(y for x, y in lips_pts) / len(lips_pts)
+        for idx in LIPS:
+            if idx < len(scaled):
+                x, y = scaled[idx]
+                scaled[idx] = (
+                    lx + (x - lx) * lips_x_scale + lips_x_trans,
+                    ly + (y - ly) * lips_y_scale + lips_y_trans
+                )
+    return scaled
+
+def estimate_face_angle(landmarks):
+    left_eye = np.array([landmarks[33]['x'], landmarks[33]['y']])
+    right_eye = np.array([landmarks[263]['x'], landmarks[263]['y']])
+    dx = right_eye[0] - left_eye[0]
+    dy = right_eye[1] - left_eye[1]
+    angle = np.degrees(np.arctan2(dy, dx))
+    return angle
+
+def detect_face_landmarks(img_np):
+    mp_face_mesh = mp.solutions.face_mesh
+    with mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1) as face_mesh:
+        results = face_mesh.process(img_np)
+        if results.multi_face_landmarks:
+            return [
+                {"x": lm.x, "y": lm.y, "z": lm.z}
+                for lm in results.multi_face_landmarks[0].landmark
+            ]
+        else:
+            return None
+
+def get_custom_connections(indices):
+    return [(indices[i], indices[i+1]) for i in range(len(indices)-1)] + [(indices[-1], indices[0])]
+
+def point_to_line_distance(point, line_start, line_end):
+    x, y = point
+    x1, y1 = line_start
+    x2, y2 = line_end
+    A = x - x1
+    B = y - y1
+    C = x2 - x1
+    D = y2 - y1
+    dot = A * C + B * D
+    len_sq = C * C + D * D
+    param = -1
+    if len_sq != 0:
+        param = dot / len_sq
+    if param < 0:
+        xx, yy = x1, y1
+    elif param > 1:
+        xx, yy = x2, y2
+    else:
+        xx = x1 + param * C
+        yy = y1 + param * D
+    dx = x - xx
+    dy = y - yy
+    return math.sqrt(dx * dx + dy * dy)
+
+def get_face_bbox(landmarks, w, h, padding=0.3):
+    xs = [lm["x"] * w for lm in landmarks]
+    ys = [lm["y"] * h for lm in landmarks]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    box_w = max_x - min_x
+    box_h = max_y - min_y
+    pad_w = box_w * padding
+    pad_h = box_h * padding
+    min_x = max(0, min_x - pad_w)
+    max_x = min(w, max_x + pad_w)
+    min_y = max(0, min_y - pad_h)
+    max_y = min(h, max_y + pad_h)
+    return int(min_x), int(min_y), int(max_x), int(max_y)
+
+def draw_outermost_face(img, points):
+    draw = ImageDraw.Draw(img)
+    pts = np.array(points)
+    if len(pts) >= 3:
+        hull = ConvexHull(pts)
+        hull_points = [tuple(pts[v]) for v in hull.vertices]
+        draw.line(hull_points + [hull_points[0]], fill=(200,0,0), width=3)
+    # Draw features robustly
+    def draw_feature(indices, color=(0,0,0), width=2, close=True):
+        pts_ = [points[i] for i in indices if i < len(points)]
+        if len(pts_) > 2:
+            if close:
+                draw.line(pts_ + [pts_[0]], fill=color, width=width)
+            else:
+                draw.line(pts_, fill=color, width=width)
+    draw_feature(LEFT_EYE, color=(0,0,0), width=2, close=True)
+    draw_feature(RIGHT_EYE, color=(0,0,0), width=2, close=True)
+    draw_feature(LIPS, color=(80,0,0), width=2, close=True)
+    draw_feature(NOSE, color=(0,0,0), width=2, close=False)
+    draw_feature(LEFT_NOSTRIL, color=(0,0,0), width=1, close=True)
+    draw_feature(RIGHT_NOSTRIL, color=(0,0,0), width=1, close=True)
+    return img
+
+from PIL import ImageEnhance, ImageOps, ImageChops
+
+def pil_to_cv2(pil_img):
+    return cv2.cvtColor(np.array(pil_img.convert("RGB")), cv2.COLOR_RGB2BGR)
+
+def cv2_to_pil(cv2_img):
+    return Image.fromarray(cv2.cvtColor(cv2_img, cv2.COLOR_BGR2RGB))
+
+def create_pencil_sketch_v1(original_img):
+    """Creates pencil sketch effect from original image."""
+    img_cv = pil_to_cv2(original_img)
+    gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+    inverted = 255 - gray
+    blurred = cv2.GaussianBlur(inverted, (21, 21), 0)
+    inverted_blurred = 255 - blurred
+    sketch = cv2.divide(gray, inverted_blurred, scale=256.0)
+    return cv2_to_pil(sketch)
+
+def blend_drawing(base_img, drawing, opacity=0.5):
+    """Soft-blend drawings over filtered image."""
+    drawing = drawing.resize(base_img.size)
+    base = base_img.convert("RGBA")
+    drawing_rgba = drawing.convert("RGBA")
+    return Image.blend(base, drawing_rgba, opacity)
+
+def generate_face_mesh_sketch(landmarks, img_size):
+    """Generate a pure face mesh sketch."""
+    img = Image.new("RGB", img_size, (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+
+    if not landmarks or len(landmarks) < 50:
+        return img
+
+    points = [(int(x), int(y)) for (x, y) in landmarks]
+    for conn in mp.solutions.face_mesh.FACEMESH_TESSELATION:
+        i, j = conn
+        if i < len(points) and j < len(points):
+            draw.line([points[i], points[j]], fill=(80, 80, 80), width=1)
+    return img
+
+def reconstruct_face_from_mesh(landmarks, img_size, skin_tone=(255, 255, 255)):
+    """Reconstruct face using landmarks."""
+    if not landmarks or len(landmarks) < 50:
+        return Image.new("RGB", img_size, (255, 255, 255))
+
+    face_img = Image.new("RGB", img_size, (255, 255, 255))
+    draw = ImageDraw.Draw(face_img)
+    points = [(int(x), int(y)) for (x, y) in landmarks]
+
+    FACE_CONTOUR = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109, 151]
+    LIPS = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95]
+    LEFT_EYE = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246]
+    RIGHT_EYE = [362, 398, 384, 385, 386, 387, 388, 466, 263, 249, 390, 373, 374, 380, 381, 382]
+    LEFT_NOSTRIL = [49, 59, 60, 48]
+    RIGHT_NOSTRIL = [279, 289, 290, 278]
+
+    def draw_feature(indices, color=(0, 0, 0), width=2):
+        pts = [points[i] for i in indices if i < len(points)]
+        if len(pts) > 1:
+            draw.line(pts + [pts[0]], fill=color, width=width)
+
+    draw_feature(FACE_CONTOUR, (0, 0, 0), 2)
+    draw_feature(LIPS, (150, 0, 0), 2)
+    draw_feature(LEFT_EYE, (0, 0, 0), 1)
+    draw_feature(RIGHT_EYE, (0, 0, 0), 1)
+    draw_feature(LEFT_NOSTRIL, (0, 0, 0), 2)
+    draw_feature(RIGHT_NOSTRIL, (0, 0, 0), 2)
+
+    return face_img
+
+
+
+# --- Session State Initialization ---
+if 'disabled_connections' not in st.session_state:
+    st.session_state.disabled_connections = set()
+if "canvas_counter" not in st.session_state:
+    st.session_state.canvas_counter = 0
+if "last_uploaded_file" not in st.session_state:
+    st.session_state.last_uploaded_file = None
+if "mesh_history" not in st.session_state:
+    st.session_state.mesh_history = []
+
+# --- Sidebar Controls ---
+st.title("Interactive Face Mesh")
+st.info(
+    "📸 For best results:\n"
+    "- Use a clear, well-lit photo\n"
+    "- Only one face, looking at the camera\n"
+    "- Avoid group photos or very small faces"
+)
+
+show_tesselation = st.sidebar.checkbox("Show Tesselation", True)
+show_contours = st.sidebar.checkbox("Show Contours", False)
+#show_irises = st.sidebar.checkbox("Show Irises", False)
+#show_lips = st.sidebar.checkbox("Show Lips", False)
+#show_left_eye = st.sidebar.checkbox("Show Left Eye", False)
+#show_right_eye = st.sidebar.checkbox("Show Right Eye", False)
+#show_left_eyebrow = st.sidebar.checkbox("Show Left Eyebrow", False)
+#show_right_eyebrow = st.sidebar.checkbox("Show Right Eyebrow", False)
+#show_nose_bridge = st.sidebar.checkbox("Show Nose Bridge", True)
+show_left_nostril = st.sidebar.checkbox("Show Left Nostril", False)
+show_right_nostril = st.sidebar.checkbox("Show Right Nostril", False)
+show_outer_face_edge = st.sidebar.checkbox("Show Outer Face Edge", True)  # NEW
+
+
+#eraser_radius = st.sidebar.slider("Eraser Size", 2, 50, 10, key="sidebar_eraser_size")
+#st.write(f"Eraser radius: {eraser_radius} px")
+
+mesh_color_hex = st.sidebar.color_picker("Mesh Line Color", "#31CB50")
+mesh_color = tuple(int(mesh_color_hex.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
+outer_edge_color = st.sidebar.color_picker("Face Edge Color", "#BB2424")
+outer_edge_color = tuple(int(outer_edge_color.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
+stroke_color = st.sidebar.color_picker("Stroke Color", "#000000")  # Black by default
+stroke_width = st.sidebar.slider("Stroke Width", 1, 20, 3)        # Min 1, Max 20, Default 3
+
+uploaded_file = st.file_uploader("Upload your photo", type=["jpg", "jpeg", "png"])
+
+st.sidebar.markdown("### Choose Face Shape")
+face_shape_option = st.sidebar.selectbox(
+    "Face Shape for morphing",
+    ["Round", "Square", "Oblong", "Heart", "Triangle","Rectangle","A-Triangle","Diamond", "Unknown"],
+    index=0
+)
+
+st.sidebar.markdown("### Resize Features")
+face_x_scale = st.sidebar.slider("Face X Scale", 0.7, 1.3, 1.0, 0.01)
+face_y_scale = st.sidebar.slider("Face Y Scale", 0.7, 1.3, 1.0, 0.01)
+eyes_x_scale = st.sidebar.slider("Eyes X Scale", 0.7, 1.3, 1.0, 0.01)
+eyes_y_scale = st.sidebar.slider("Eyes Y Scale", 0.7, 1.3, 1.0, 0.01)
+nose_x_scale = st.sidebar.slider("Nose X Scale", 0.7, 1.3, 1.0, 0.01)
+nose_y_scale = st.sidebar.slider("Nose Y Scale", 0.7, 1.3, 1.0, 0.01)
+nostrils_x_scale = st.sidebar.slider("Nostrils X Scale", 0.7, 1.3, 1.0, 0.01)
+nostrils_y_scale = st.sidebar.slider("Nostrils Y Scale", 0.7, 1.3, 1.0, 0.01)
+lips_x_scale = st.sidebar.slider("Lips X Scale", 0.7, 1.3, 1.0, 0.01)
+lips_y_scale = st.sidebar.slider("Lips Y Scale", 0.7, 1.3, 1.0, 0.01)
+
+st.sidebar.markdown("### Move Features")
+face_x_trans = st.sidebar.slider("Face X Translation", -100, 100, 0, 1)
+face_y_trans = st.sidebar.slider("Face Y Translation", -100, 100, 0, 1)
+eyes_x_trans = st.sidebar.slider("Eyes X Translation", -50, 50, 0, 1)
+eyes_y_trans = st.sidebar.slider("Eyes Y Translation", -50, 50, 0, 1)
+nose_x_trans = st.sidebar.slider("Nose X Translation", -50, 50, 0, 1)
+nose_y_trans = st.sidebar.slider("Nose Y Translation", -50, 50, 0, 1)
+nostrils_x_trans = st.sidebar.slider("Nostrils X Translation", -50, 50, 0, 1)
+nostrils_y_trans = st.sidebar.slider("Nostrils Y Translation", -50, 50, 0, 1)
+lips_x_trans = st.sidebar.slider("Lips X Translation", -50, 50, 0, 1)
+lips_y_trans = st.sidebar.slider("Lips Y Translation", -50, 50, 0, 1)
+
+# --- Reset state if new image is uploaded ---
+if uploaded_file is not None and uploaded_file != st.session_state.last_uploaded_file:
+    st.session_state.disabled_connections = set()
+    st.session_state.mesh_history = []
+    st.session_state.canvas_counter = 0
+    st.session_state.last_uploaded_file = uploaded_file
+
+#undo_col, reset_col = st.columns([1, 1])
+#with undo_col:
+#    undo_clicked = st.button("Undo Last Erase", key="undo_btn")
+#with reset_col:
+#    reset_clicked = st.button("Reset Mesh", key="reset_mesh_btn")
+
+#if reset_clicked:
+#    st.session_state.disabled_connections = set()
+#    st.session_state.mesh_history = []
+#    st.session_state.canvas_counter += 1
+#    st.rerun()
+
+#if undo_clicked:
+#    if st.session_state.mesh_history:
+#        st.session_state.disabled_connections = st.session_state.mesh_history.pop()
+#        st.session_state.canvas_counter += 1
+#        st.rerun()
+
+# === Stroke Settings in Sidebar ===
+
+
+if uploaded_file:
+    img = Image.open(uploaded_file).convert("RGB")
+    img = detect_and_zoom_face(img, zoom_factor=1.8)
+    img_np = np.array(img)
+    landmarks = detect_face_landmarks(img_np)
+    if landmarks is None or len(landmarks) < 50:
+        st.error("😕 No face detected. Please use a clearer, larger, single-face photo.")
+        st.stop()
+
+    if len(landmarks) > 263:
+        angle = estimate_face_angle(landmarks)
+        if abs(angle) > 20:
+            st.warning(f"⚠️ The face appears rotated by {int(angle)}°. "
+                       "Contours may not align well. For best results, use a frontal face photo.")
+
+    orig_w, orig_h = img.size
+    min_x, min_y, max_x, max_y = get_face_bbox(landmarks, orig_w, orig_h, padding=0.3)
+    face_crop = img.crop((min_x, min_y, max_x, max_y))
+    output_size = 512
+    face_crop = face_crop.resize((output_size, output_size), Image.LANCZOS)
+    scale_x = output_size / (max_x - min_x)
+    scale_y = output_size / (max_y - min_y)
+
+    points = []
+    for lm in landmarks:
+        x = (lm["x"] * orig_w - min_x) * scale_x
+        y = (lm["y"] * orig_h - min_y) * scale_y
+        points.append((int(x), int(y)))
+
+    mp_face_mesh = mp.solutions.face_mesh
+    connections = []
+    if show_tesselation:
+        connections.extend(mp_face_mesh.FACEMESH_TESSELATION)
+    if show_contours:
+        connections.extend(mp_face_mesh.FACEMESH_CONTOURS)
+    if show_left_nostril:
+        connections.extend(get_custom_connections(LEFT_NOSTRIL))
+    if show_right_nostril:
+        connections.extend(get_custom_connections(RIGHT_NOSTRIL))
+
+    connections = list(set(connections))
+    unique_connections = set()
+    for i, j in connections:
+        if (j, i) not in unique_connections:
+            unique_connections.add((i, j))
+    connections = list(unique_connections)
+    active_connections = [conn for conn in connections if conn not in st.session_state.disabled_connections]
+
+    # Draw mesh for editing
+    editable_img = face_crop.copy()
+    draw = ImageDraw.Draw(editable_img)
+    for conn in active_connections:
+        i, j = conn
+        if i < len(points) and j < len(points):
+            draw.line([points[i], points[j]], fill=mesh_color, width=1)
+
+    # Show the mesh image
+    #st.image(editable_img, caption="Face Mesh", use_container_width=True)
+
+    # === Drawing Canvas Over Uploaded Image ===
+    st.subheader("Draw on Face Mesh")
+
+    canvas_result = st_canvas(
+        fill_color="rgba(255, 0, 0, 0.3)",  # Transparent fill
+        stroke_width=stroke_width,
+        stroke_color=stroke_color,
+        background_image=editable_img,
+        update_streamlit=True,
+        height=editable_img.height,
+        width=editable_img.width,
+        drawing_mode="freedraw",
+        key="face_drawing_canvas"
+    )
+
+    # Convert user drawing to image if available
+    if canvas_result.image_data is not None:
+        drawn_image = Image.fromarray((canvas_result.image_data).astype("uint8"))
+        st.image(drawn_image, caption="Your Drawing", use_container_width=True)
+
+        # Optional: Save the drawing result
+        buf_drawing = BytesIO()
+        drawn_image.save(buf_drawing, format="PNG")
+        st.download_button(
+            "Download Drawing",
+            buf_drawing.getvalue(),
+            file_name="drawing_on_face.png",
+            mime="image/png"
+        )
+
+    # Download Face Mesh (without drawing)
+    buf_mesh = BytesIO()
+    editable_img.save(buf_mesh, format="PNG")
+    st.download_button(
+        "Download Face Mesh",
+        buf_mesh.getvalue(),
+        file_name="edited_mesh.png",
+        mime="image/png"
+    )
+
+
+
+
+    # --- Morph face shape and apply feature adjustments for last two columns ---
+    morphed_points = morph_face_shape(points, face_shape_option)
+    adj_points = apply_scales_and_translations(
+        morphed_points,
+        face_x_scale, face_y_scale, face_x_trans, face_y_trans,
+        eyes_x_scale, eyes_y_scale, eyes_x_trans, eyes_y_trans,
+        nose_x_scale, nose_y_scale, nose_x_trans, nose_y_trans,
+        nostrils_x_scale, nostrils_y_scale, nostrils_x_trans, nostrils_y_trans,
+        lips_x_scale, lips_y_scale, lips_x_trans, lips_y_trans
+    )
+    # Only apply face X/Y scale and translation to morphed_points for the hull
+    face_scaled_points = apply_scales_and_translations(
+        morphed_points,
+        face_x_scale, face_y_scale, face_x_trans, face_y_trans,
+        1.0, 1.0, 1.0, 1.0,   # Eyes: no scaling/translation
+        1.0, 1.0, 1.0, 1.0,   # Nose: no scaling/translation
+        1.0, 1.0, 1.0, 1.0,   # Nostrils: no scaling/translation
+        1.0, 1.0, 1.0, 1.0    # Lips: no scaling/translation
+    )
+
+    original_connections = list(connections)  # Save original mesh connections
+    original_points = list(points)            # Save original points
+    st.info("Choose options in the sidebar to turn tesselation and other features on or off.")
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        #st.subheader("Face Boundary")
+
+        # 1. Create the pencil sketch background
+        pencil_bg = create_pencil_sketch_background(face_crop)  # or use original img, cropped & resized
+
+        # 2. Draw the outer face boundary on a transparent layer
+        boundary_layer = Image.new('RGBA', editable_img.size, (0, 0, 0, 0))  # Transparent
+        boundary_layer = draw_outermost_face(boundary_layer, adj_points)  # must use RGBA-aware drawing
+
+        # 3. Composite: overlay boundary lines onto pencil sketch background
+        pencil_bg_rgba = pencil_bg.convert('RGBA')
+        boundary_on_pencil = Image.alpha_composite(pencil_bg_rgba, boundary_layer)
+
+        st.image(boundary_on_pencil, use_container_width=True)
+        buf_adj_boundary = BytesIO()
+        boundary_on_pencil.save(buf_adj_boundary, format="PNG")
+        st.download_button("Download Adjusted Boundary", buf_adj_boundary.getvalue(), file_name="adjusted_boundary.png", mime="image/png")
+
+    with col2:
+        #st.subheader("Before-After Adjustment")
+        pencil_bg = create_pencil_sketch_background(editable_img)
+        sketch_img = pencil_bg.copy()
+        draw = ImageDraw.Draw(sketch_img)
+        for i, j in original_connections:
+            if i < len(original_points) and j < len(original_points):
+                draw.line([original_points[i], original_points[j]], fill=mesh_color, width=1)
+        if show_outer_face_edge:
+            pts = np.array(face_scaled_points)
+            if len(pts) >= 3:
+                hull = ConvexHull(pts)
+                hull_points = [tuple(pts[v]) for v in hull.vertices]
+                draw.line(hull_points + [hull_points[0]], fill=outer_edge_color, width=3)
+        st.image(sketch_img, use_container_width=True)
+        buf_sketch = BytesIO()
+        sketch_img.save(buf_sketch, format="PNG")
+        st.download_button("Download Pencil Sketch", buf_sketch.getvalue(), file_name="pencil_sketch.png", mime="image/png")
+
+    with col3:
+        #st.subheader("Adjusted Face Map")
+
+        # White background, same size as editable_img
+        facemesh_img = Image.new('RGBA', editable_img.size, (255, 255, 255, 255))
+
+        # Draw face mesh lines using adjusted points (same as col1)
+        draw_facemesh = ImageDraw.Draw(facemesh_img)
+        for i, j in original_connections:
+            if i < len(adj_points) and j < len(adj_points):
+                draw_facemesh.line([adj_points[i], adj_points[j]], fill=mesh_color, width=1)
+
+        # Draw outermost face boundary (if enabled) using adj_points
+        if show_outer_face_edge:
+            pts = np.array(adj_points)
+            if len(pts) >= 3:
+                hull = ConvexHull(pts)
+                hull_points = [tuple(pts[v]) for v in hull.vertices]
+                draw_facemesh.line(hull_points + [hull_points[0]], fill=outer_edge_color, width=3)
+
+        # Display facemesh-only sketch
+        st.image(facemesh_img.convert("RGB"), use_container_width=True)
+
+        # Save to download
+        buf_facemesh = BytesIO()
+        facemesh_img.convert("RGB").save(buf_facemesh, format="PNG")
+        st.download_button("Download Facemesh Only", buf_facemesh.getvalue(), file_name="facemesh_only.png", mime="image/png")
+
+
+    if landmarks:
+        facemesh_img = reconstruct_face_from_mesh(points, editable_img.size)
+        pencil_sketch = create_pencil_sketch_v1(editable_img)
+
+        # Blended Result v1: Pencil Sketch + Drawing Trace
+        blended_result_v1 = pencil_sketch.convert("RGBA")
+
+        # Blended Result v2: Uploaded Image + Drawing Trace
+        blended_result_v2 = editable_img.convert("RGBA")
+
+        if canvas_result.image_data is not None:
+            drawn_image = Image.fromarray((canvas_result.image_data).astype("uint8")).convert("RGBA")
+            blended_result_v1 = Image.alpha_composite(blended_result_v1, drawn_image)
+            blended_result_v2 = Image.alpha_composite(blended_result_v2, drawn_image)
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        # FaceSketch v1
+        with col1:
+            st.image(facemesh_img, caption="FaceSketch v1")
+            buf = BytesIO()
+            facemesh_img.save(buf, format="PNG")
+            st.download_button("Download FaceSketch v1", buf.getvalue(), "facesketch_v1.png", "image/png")
+
+        # Blended Result v1
+        with col2:
+            st.image(blended_result_v1, caption="Blended Result v1 (Pencil + Trace)")
+            buf = BytesIO()
+            blended_result_v1.convert("RGB").save(buf, format="PNG")
+            st.download_button("Download Blended Result v1", buf.getvalue(), "blended_result_v1.png", "image/png")
+
+        # Blended Result v2
+        with col3:
+            st.image(blended_result_v2, caption="Blended Result v2 (Image + Trace)")
+            buf = BytesIO()
+            blended_result_v2.convert("RGB").save(buf, format="PNG")
+            st.download_button("Download Blended Result v2", buf.getvalue(), "blended_result_v2.png", "image/png")
+
+        # Pencil Sketch v1
+        with col4:
+            st.image(pencil_sketch, caption="Pencil Sketch v1")
+            buf = BytesIO()
+            pencil_sketch.save(buf, format="PNG")
+            st.download_button("Download Pencil Sketch v1", buf.getvalue(), "pencil_sketch_v1.png", "image/png")
+
+    else:
+        st.warning("No landmarks detected. Please upload a valid face image.")
+
+#======SAVED SKETCH
+# ========== AUTH CHECK ==========
+# === PROTECTED CONTENT ===
+from Security.face_sketch_db import save_face_sketch, load_user_sketches
+
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "sketch_uploads")
+
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+if not st.session_state["auth_status"]:
+    st.warning("🔒 Please log in to access this page.")
+    st.stop()
+
+if not st.session_state["auth_status"]:
+    st.title("🔐 Login to Your Face Designer Studio")
+
+    username = st.text_input("Username", key="face_login_username")
+    password = st.text_input("Password", type="password", key="face_login_password")
+
+    if st.button("Log In", key="face_login_button"):
+        if verify_user_credentials(username, password):
+            st.session_state["auth_status"] = True
+            st.session_state["username"] = username
+            st.session_state["user_id"] = username  # or fetch actual user_id from DB if different
+            st.success("✅ Logged in successfully!")
+            st.rerun()
+        else:
+            st.error("❌ Invalid credentials. Please try again.")
+
+    st.stop()
+
+
+user_id = st.session_state["user_id"]
+username = st.session_state["username"]
+# ========== SAVE SKETCH FORM ==========
+with st.container():
+    st.markdown('<div class="gray-box">', unsafe_allow_html=True)
+    st.subheader("Save Your Sketch")
+
+    with st.form("save_sketch_form_main", clear_on_submit=True):
+        uploaded_file = st.file_uploader("Upload a finished sketch (PNG or JPG)", type=["png", "jpg", "jpeg"])
+        sketch_name = st.text_input("Sketch Name")
+        category = st.text_input("Enter a category (e.g., Bridal, Glam, Editorial)")
+        submit = st.form_submit_button("Save Sketch")
+
+        if submit:
+            if uploaded_file and sketch_name:
+                image_bytes = uploaded_file.read()
+                save_face_sketch(user_id, image_bytes, metadata=sketch_name, category=category)
+                st.success("Sketch saved successfully!")
+                st.rerun()
+            else:
+                st.warning("Please upload a sketch and enter a name.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ========== LOAD SAVED SKETCHES ==========
+
+all_sketches = load_user_sketches(user_id)
+if all_sketches:
+    with st.container():
+        st.markdown('<div class="gray-box">', unsafe_allow_html=True)
+        st.markdown("### My Saved Sketches")
+
+        all_categories = sorted(set(cat for _, _, _, cat in all_sketches if cat))
+        selected_filter = st.selectbox("🔍 View by Category", ["All"] + all_categories)
+
+        sketches = all_sketches if selected_filter == "All" else [
+            s for s in all_sketches if s[3] == selected_filter
+        ]
+
+        cols = st.columns(4)
+        for idx, (sketch_id, image_data, metadata, category) in enumerate(sketches):
+            col = cols[idx % 4]
+            with col:
+                try:
+                    image = Image.open(io.BytesIO(image_data))
+                except Exception:
+                    try:
+                        if isinstance(image_data, str) and os.path.exists(image_data):
+                            with open(image_data, "rb") as f:
+                                image_bytes = f.read()
+                            image = Image.open(io.BytesIO(image_bytes))
+                            save_face_sketch(user_id, image_bytes, metadata, category)
+                            delete_sketch(sketch_id)
+                            continue
+                        else:
+                            delete_sketch(sketch_id)
+                            continue
+                    except Exception:
+                        delete_sketch(sketch_id)
+                        continue
+
+                if image:
+                    st.image(image, use_container_width=True)
+                    st.markdown(f"**{metadata or 'Untitled'}**")
+                    st.caption(f"📁 {category or 'Uncategorized'}")
+
+                    # Right-aligned delete button below the image
+                    unique_key = f"delete_{sketch_id}"
+                    delete_col = st.columns([0.85, 0.15])[1]
+                    with delete_col:
+                        if st.button("❌", key=unique_key):
+                            delete_sketch(sketch_id)
+                            st.success("Sketch deleted.")
+                            st.rerun()
+
+        st.markdown('</div>', unsafe_allow_html=True)
+else:
+    st.info("You haven't saved any sketches yet.")

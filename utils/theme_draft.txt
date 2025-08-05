@@ -1,0 +1,333 @@
+import streamlit as st
+
+def apply_theme():
+    st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&display=swap');
+
+    html, body {
+        font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+        font-size: 0.8rem;
+        background: linear-gradient(145deg, #f0f2f5 0%, #e3e9ef 100%) fixed;
+        color: #222;
+        margin: 0;
+        padding: 0;
+    }
+
+    /* === One Big Outer Glasscard === */
+    [data-testid="stAppViewContainer"] > .main {
+        background: rgba(255, 255, 255, 0.7);
+        border-radius: 24px;
+        box-shadow: 0 0 40px rgba(160, 180, 200, 0.22);
+        backdrop-filter: blur(18px);
+        padding: 2rem 3rem;
+        margin: 1.5rem auto;
+        max-width: 1200px;
+    }
+
+    /* Header fonts */
+    h1, h2, h3,
+    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3,
+    .css-10trblm, .css-1v0mbdj {
+        font-family: 'Cinzel Decorative', serif !important;
+        font-size: 1.2rem !important;
+        color: #1d1d1f;
+        letter-spacing: 0.5px;
+    }
+
+    /* Metric cards */
+    [data-testid="stMetric"] {
+        border-radius: 14px;
+        background: rgba(255,255,255,0.75);
+        box-shadow: 0 2px 16px rgba(180,180,200,0.12);
+        padding: 10px 16px;
+        margin: 6px 0;
+    }
+
+    /* DataFrame Table Styling */
+    [data-testid="stDataFrameContainer"] {
+        border-radius: 12px;
+        background: rgba(255,255,255,0.92);
+        box-shadow: 0 4px 18px rgba(180,180,180,0.12);
+        padding: 12px;
+    }
+
+    /* Button Styling */
+    [data-testid="baseButton-secondary"], .stButton > button {
+        background: #4A4A6A;
+        color: #fff;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 0.8rem;
+        border: none;
+        transition: background 0.2s;
+    }
+    [data-testid="baseButton-secondary"]:hover, .stButton > button:hover {
+        background: linear-gradient(90deg, #4A4A6A 80%, #E0C3FC 100%);
+    }
+
+    /* Download Button */
+    .stDownloadButton > button {
+        background-color: #dee4ec;
+        color: #222;
+        border-radius: 8px;
+        font-weight: 500;
+    }
+    .stDownloadButton > button:hover {
+        background-color: #c4d5e0;
+        transition: 0.3s ease-in-out;
+    }
+
+    /* Input and textarea styles */
+    input, select, textarea {
+        border-radius: 8px;
+        border: 1.5px solid #AAB8C2;
+        font-size: 0.8rem;
+        font-family: inherit;
+    }
+    input:focus, select:focus, textarea:focus {
+        border-color: #E0C3FC;
+        box-shadow: 0 0 0 2px #E0C3FC44;
+    }
+
+    /* Shimmer loading effect */
+    .element-container:has(.stSpinner) {
+        background: linear-gradient(to right, #dde4ec 25%, #f5f9fd 50%, #dde4ec 75%);
+        background-size: 400% 100%;
+        animation: shimmer 1.5s infinite;
+    }
+    @keyframes shimmer {
+        0% { background-position: -400% 0; }
+        100% { background-position: 400% 0; }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+
+
+
+
+import streamlit as st
+
+def apply_theme():
+    st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&display=swap');
+
+    html, body {
+        font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+        font-size: 0.8rem;
+        background: linear-gradient(145deg, #f0f2f5 0%, #e3e9ef 100%) fixed;
+        color: #222;
+        margin: 0;
+        padding: 0;
+    }
+
+    /* === One Big Outer Glasscard === */
+    [data-testid="stAppViewContainer"] > .main {
+        background: rgba(255, 255, 255, 0.7);
+        border-radius: 24px;
+        box-shadow: 0 0 40px rgba(160, 180, 200, 0.22);
+        backdrop-filter: blur(18px);
+        padding: 2rem 3rem;
+        margin: 1.5rem auto;
+        max-width: 1200px;
+    }
+
+    /* Header fonts */
+    h1, h2, h3,
+    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3,
+    .css-10trblm, .css-1v0mbdj {
+        font-family: 'Cinzel Decorative', serif !important;
+        font-size: 1.2rem !important;
+        color: #1d1d1f;
+        letter-spacing: 0.5px;
+    }
+
+    /* Metric cards */
+    [data-testid="stMetric"] {
+        border-radius: 14px;
+        background: rgba(255,255,255,0.75);
+        box-shadow: 0 2px 16px rgba(180,180,200,0.12);
+        padding: 10px 16px;
+        margin: 6px 0;
+    }
+
+    /* DataFrame Table Styling */
+    [data-testid="stDataFrameContainer"] {
+        border-radius: 12px;
+        background: rgba(255,255,255,0.92);
+        box-shadow: 0 4px 18px rgba(180,180,180,0.12);
+        padding: 12px;
+    }
+
+    /* Button Styling */
+    [data-testid="baseButton-secondary"], .stButton > button {
+        background: #4A4A6A;
+        color: #fff;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 0.8rem;
+        border: none;
+        transition: background 0.2s;
+    }
+    [data-testid="baseButton-secondary"]:hover, .stButton > button:hover {
+        background: linear-gradient(90deg, #4A4A6A 80%, #E0C3FC 100%);
+    }
+
+    /* Download Button */
+    .stDownloadButton > button {
+        background-color: #dee4ec;
+        color: #222;
+        border-radius: 8px;
+        font-weight: 500;
+    }
+    .stDownloadButton > button:hover {
+        background-color: #c4d5e0;
+        transition: 0.3s ease-in-out;
+    }
+
+    /* Input and textarea styles */
+    input, select, textarea {
+        border-radius: 8px;
+        border: 1.5px solid #AAB8C2;
+        font-size: 0.8rem;
+        font-family: inherit;
+    }
+    input:focus, select:focus, textarea:focus {
+        border-color: #E0C3FC;
+        box-shadow: 0 0 0 2px #E0C3FC44;
+    }
+
+    /* Shimmer loading effect */
+    .element-container:has(.stSpinner) {
+        background: linear-gradient(to right, #dde4ec 25%, #f5f9fd 50%, #dde4ec 75%);
+        background-size: 400% 100%;
+        animation: shimmer 1.5s infinite;
+    }
+    @keyframes shimmer {
+        0% { background-position: -400% 0; }
+        100% { background-position: 400% 0; }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+
+
+
+
+
+##########################3
+import streamlit as st
+import base64
+import os
+
+# --- Setup ---
+#st.set_page_config(page_title="BeautyBlend Profile", layout="wide")
+
+# --- Load and Apply Custom Theme ---
+def apply_theme(bg_image_path="utils/background/theme_background.png"):
+    background = ""
+    if bg_image_path and os.path.exists(bg_image_path):
+        with open(bg_image_path, "rb") as f:
+            bg_base64 = base64.b64encode(f.read()).decode()
+            background = f"""
+            background-image: url("data:image/png;base64,{bg_base64}");
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            background-repeat: no-repeat;
+            """
+
+    st.markdown(f"""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Poppins:wght@400&display=swap');
+
+    [data-testid="stAppViewContainer"] {{
+        {background}
+    }}
+
+    .stApp {{
+        font-family: 'Poppins', sans-serif;
+        color: #222;
+    }}
+
+    h1, h2, h3, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {{
+        font-family: 'Cinzel Decorative', cursive;
+        color: #d12a6a;
+        font-weight: 700;
+    }}
+
+    [data-testid="stAppViewContainer"] > .main {{
+        background: rgba(255, 255, 255, 0.75);
+        border-radius: 24px;
+        box-shadow: 0 0 40px rgba(160, 180, 200, 0.22);
+        backdrop-filter: blur(18px);
+        padding: 2rem 3rem;
+        margin: 2rem auto;
+        max-width: 1300px;
+    }}
+
+    .stButton > button, [data-testid="baseButton-secondary"] {{
+        background: #4A4A6A;
+        color: #fff;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 0.85rem;
+        border: none;
+        transition: background 0.2s;
+    }}
+    .stButton > button:hover, [data-testid="baseButton-secondary"]:hover {{
+        background: linear-gradient(90deg, #4A4A6A 80%, #E0C3FC 100%);
+    }}
+
+    .stDownloadButton > button {{
+        background-color: #dee4ec;
+        color: #222;
+        border-radius: 8px;
+        font-weight: 500;
+    }}
+    .stDownloadButton > button:hover {{
+        background-color: #c4d5e0;
+        transition: 0.3s ease-in-out;
+    }}
+
+    input, select, textarea {{
+        border-radius: 8px;
+        border: 1.5px solid #AAB8C2;
+        font-family: inherit;
+        font-size: 0.85rem;
+    }}
+    input:focus, select:focus, textarea:focus {{
+        border-color: #E0C3FC;
+        box-shadow: 0 0 0 2px #E0C3FC44;
+    }}
+
+    .element-container:has(.stSpinner) {{
+        background: linear-gradient(to right, #dde4ec 25%, #f5f9fd 50%, #dde4ec 75%);
+        background-size: 400% 100%;
+        animation: shimmer 1.5s infinite;
+    }}
+    @keyframes shimmer {{
+        0% {{ background-position: -400% 0; }}
+        100% {{ background-position: 400% 0; }}
+    }}
+    </style>
+    """, unsafe_allow_html=True)
+
+apply_theme()
+
+# === Now continue with your layout as usual ===
+tabs = st.tabs(["Profile", "Portfolio", "Bookings"])
+
+with tabs[0]:
+    st.header("🎨 Artist Profile")
+    st.write("This section shows artist bio, services, social links, and ratings.")
+
+with tabs[1]:
+    st.header("🖼️ Portfolio")
+    st.write("Tabbed portfolio with sketches, images, AI art, and videos.")
+
+with tabs[2]:
+    st.header("📅 Bookings")
+    st.write("View confirmed bookings and contact options.")

@@ -1,0 +1,213 @@
+import streamlit as st
+import base64
+
+# --- Initialize Session State ---
+if "active_tab" not in st.session_state:
+    st.session_state["active_tab"] = "home"
+
+# --- Page Config ---
+st.set_page_config(page_title="BeautyBlend", layout="wide")
+
+# --- Hide Sidebar Nav ---
+st.markdown("""
+    <style>
+    section[data-testid="stSidebarNav"] {
+        display: none !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- Load Background Image ---
+def get_base64_image(image_path):
+    with open(image_path, "rb") as f:
+        return base64.b64encode(f.read()).decode()
+
+bg_image = get_base64_image("A_digital_painting_in_an_abstract_style_with_cubis.png")
+
+# --- Inject Custom CSS ---
+st.markdown(
+    f"""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Poppins:wght@400&display=swap');
+    html, body, .stApp {{
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        background-image: url("data:image/png;base64,{bg_image}");
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+    }}
+    .fixed-top-nav {{
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        z-index: 9999;
+        background: rgba(255,255,255,0.18);
+        backdrop-filter: blur(12px);
+        display: flex;
+        justify-content: center;
+        gap: 2rem;
+        padding: 1.1rem 0 1.1rem 0;
+        box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+    }}
+    .fixed-top-nav button {{
+        border: none;
+        outline: none;
+        padding: 0.7rem 1.7rem;
+        border-radius: 30px;
+        font-family: 'Poppins', sans-serif;
+        font-size: 16px;
+        color: #fff;
+        background: linear-gradient(90deg, #f8b6d2 0%, #b6e0fe 100%);
+        box-shadow: 0 2px 12px rgba(248,182,210,0.12);
+        cursor: pointer;
+        transition: transform 0.15s, box-shadow 0.15s, background 0.15s;
+        margin: 0 0.2rem;
+    }}
+    .fixed-top-nav button:hover {{
+        transform: scale(1.06);
+        background: linear-gradient(90deg, #b6e0fe 0%, #f8b6d2 100%);
+        box-shadow: 0 4px 24px rgba(182,224,254,0.18);
+    }}
+    .stApp {{
+        padding-top: 80px !important;
+    }}
+    .glass-box {{
+        background: rgba(255, 255, 255, 0.2);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        border-radius: 30px;
+        padding: 4.5rem 2.5rem 3.5rem 2.5rem;
+        text-align: center;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        max-width: 1100px;
+        width: 98%;
+        margin: 4rem auto 0 auto;
+        animation: fadeInCard 1.5s ease-out;
+        position: relative;
+    }}
+    .title {{
+        font-family: 'Cinzel Decorative', cursive;
+        font-size: 64px;
+        color: white;
+        font-weight: bold;
+        text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.4);
+        margin-bottom: 1rem;
+        margin-top: 0.5rem;
+    }}
+    .subtitle {{
+        font-family: 'Poppins', sans-serif;
+        font-size: 20px;
+        color: white;
+        text-shadow: 1px 1px 4px rgba(0, 0, 0, 0.3);
+        margin-bottom: 2.5rem;
+    }}
+    .subheader {{
+        font-family: 'Cinzel Decorative', serif;
+        font-size: 36px;
+        color: white;
+        margin-bottom: 1.5rem;
+        margin-top: 2rem;
+        text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.3);
+    }}
+    .role-title {{
+        font-family: 'Cinzel Decorative', serif;
+        font-size: 15px;
+        color: white;
+        margin-top: 0.5rem;
+        text-transform: lowercase;
+        letter-spacing: 0.5px;
+        line-height: 1.4;
+    }}
+    .role-title::first-letter {{
+        text-transform: uppercase;
+    }}
+    @keyframes fadeInCard {{
+        from {{ opacity: 0; transform: translateY(30px); }}
+        to {{ opacity: 1; transform: translateY(0); }}
+    }}
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# --- Fixed Top Navigation Bar ---
+st.markdown('<div class="fixed-top-nav">', unsafe_allow_html=True)
+if st.button("About BeautyBlend", key="nav_about"):
+    st.session_state["active_tab"] = "about"
+if st.button("Explore Gallery", key="nav_gallery"):
+    st.session_state["active_tab"] = "gallery"
+if st.button("Find an Artist", key="nav_find"):
+    st.session_state["active_tab"] = "find"
+if st.button("Help", key="nav_help"):
+    st.session_state["active_tab"] = "help"
+st.markdown('</div>', unsafe_allow_html=True)
+
+# --- About Modal/Slide ---
+if st.session_state["active_tab"] == "about":
+    bg_image_base64 = get_base64_image("introduction_BeautyBlend.jpg")
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            background-image: url("data:image/png;base64,{bg_image_base64}");
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            animation: fadeInBg 1.5s ease-in-out forwards;
+        }}
+        </style>
+        <div class="glass-box">
+            <div class="title">BeautyBlend</div>
+            <div class="subtitle">
+                Born from a personal journey through the world of beauty, this platform invites creatives — from face designers to professional makeup artists — to collaborate, inspire, and bring visual poetry to life.<br><br>
+                Designers and dreamers can explore imaginative makeup ideas digitally, while artists bring those visions to life through their craft. Together, they form a living gallery — one that celebrates bold expression, individuality, and the magic of transformation.
+            </div>
+            <div class="subtitle" style="font-style: italic;">“Art is not what you see, but what you make others see.” — Edgar Degas</div>
+            <div class="subtitle">Created with intention and love by Nikki.</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    if st.button("Back to Home"):
+        st.session_state["active_tab"] = "home"
+        st.rerun()
+    st.stop()
+
+# --- Main Content (only if not About tab) ---
+if st.session_state["active_tab"] == "gallery":
+    st.title("Explore Gallery")
+    st.info("Gallery feature coming soon! Here you'll browse creative works from the BeautyBlend community.")
+elif st.session_state["active_tab"] == "find":
+    st.title("Find an Artist")
+    st.info("Artist search coming soon! You'll be able to discover and connect with top talent.")
+elif st.session_state["active_tab"] == "help":
+    st.title("Help")
+    st.info("Help & How It Works coming soon! Here you'll find tips, FAQs, and platform guidance.")
+else:
+    # --- Main Glasscard Layout (Home) ---
+    st.markdown('<div class="center-content">', unsafe_allow_html=True)
+    st.markdown('<div class="glass-box">', unsafe_allow_html=True)
+    st.markdown('<div class="title">BeautyBlend</div>', unsafe_allow_html=True)
+    st.markdown('<div class="subtitle">Where the face is a canvas, makeup is poetry, and every creation is an unfiltered expression of the artist\'s soul</div>', unsafe_allow_html=True)
+    st.markdown('<div class="subheader">Who are you?</div>', unsafe_allow_html=True)
+
+    role_cols = st.columns(3)
+    with role_cols[0]:
+        if st.button("Makeup Artist"):
+            st.switch_page("pages/main_Makeup_Artist.py")
+        st.image("makeup_artist_card.png", use_container_width=True)
+        st.markdown('<div class="role-title">your creative sanctuary to express, evolve, and showcase the true art of makeup</div>', unsafe_allow_html=True)
+    with role_cols[1]:
+        if st.button("Face Designer"):
+            st.switch_page("pages/1_Face_Designer.py")
+        st.image("face_designer_card.png", use_container_width=True)
+        st.markdown('<div class="role-title">your imaginative canvas to explore, design, and bring visionary face art to live</div>', unsafe_allow_html=True)
+    with role_cols[2]:
+        if st.button("Art Explorer"):
+            st.info("Coming soon! Stay tuned for the Beauty Enjoyer experience.")
+        st.image("art_lover_card.png", use_container_width=True)
+        st.markdown('<div class="role-title">your artistic playground to experiment and let your imagination roam free</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)

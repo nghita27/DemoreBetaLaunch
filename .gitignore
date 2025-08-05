@@ -1,0 +1,10 @@
+# Ignore virtual environments
+venv/
+env/
+beautyblendbeta-env/
+
+# General Python ignores
+__pycache__/
+*.pyc
+
+# You can add more ignores if needed
