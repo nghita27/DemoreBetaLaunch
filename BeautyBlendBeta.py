@@ -7,14 +7,6 @@ from streamlit.components.v1 import html
 
 # --- Page Config ---
 st.set_page_config(page_title="Demore", layout="wide")
-#=============== PAGE AUTHENTICATION: LOG IN 
-
-from Security.auth_db import (
-    register_user,
-    verify_user_credentials,
-    send_password_reset_email,
-    update_remember_me,
-)
 
 import streamlit as st
 import os
@@ -38,140 +30,140 @@ import sqlite3
 # --- Persistent Session Setup ---
 
 # --- Persistent Session Setup ---
-import streamlit as st
-import os
-import sqlite3
-from Security.auth_db import (
-    register_user,
-    verify_user_credentials,
-    send_password_reset_email,
-    update_remember_me,
-)
+#import streamlit as st
+#import os
+#import sqlite3
+#from Security.auth_db import (
+#    register_user,
+#    verify_user_credentials,
+#    send_password_reset_email,
+#    update_remember_me,
+#)
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "portfolio.db")
 
 
 
 # --- Persistent Session Setup ---
-if "auth_status" not in st.session_state:
-    st.session_state["auth_status"] = False
-    st.session_state["user_id"] = None
-    st.session_state["username"] = None
-    st.session_state["remember_me"] = False
+#if "auth_status" not in st.session_state:
+#    st.session_state["auth_status"] = False
+#    st.session_state["user_id"] = None
+#    st.session_state["username"] = None
+#    st.session_state["remember_me"] = False
 
     # Load from file if exists
-    if os.path.exists(".login_session"):
-        with open(".login_session", "r") as f:
-            data = f.read().strip().split("::")
-            if len(data) == 2:
-                st.session_state["auth_status"] = True
-                st.session_state["user_id"] = data[0]
-                st.session_state["username"] = data[1]
+#    if os.path.exists(".login_session"):
+#        with open(".login_session", "r") as f:
+#            data = f.read().strip().split("::")
+#            if len(data) == 2:
+#                st.session_state["auth_status"] = True
+#                st.session_state["user_id"] = data[0]
+#                st.session_state["username"] = data[1]
 
 # --- Top-right dropdown ---
-col1, col2 = st.columns([8, 1])
-with col2:
-    if st.session_state["auth_status"]:
-        account_action = st.selectbox(
-            "Account",
-            ["", "Logout"],
-            format_func=lambda x: "Account" if x == "" else x,
-            label_visibility="collapsed",
-            key="account_action_app"
-        )
-    else:
-        account_action = st.selectbox(
-            "Account",
-            ["", "Log in", "Register", "Forgot Password"],
-            format_func=lambda x: "Account" if x == "" else x,
-            label_visibility="collapsed",
-            key="account_action_app"
-        )
+#col1, col2 = st.columns([8, 1])
+#with col2:
+#    if st.session_state["auth_status"]:
+#        account_action = st.selectbox(
+#            "Account",
+#            ["", "Logout"],
+#            format_func=lambda x: "Account" if x == "" else x,
+#            label_visibility="collapsed",
+#            key="account_action_app"
+#        )
+#    else:
+#        account_action = st.selectbox(
+#            "Account",
+#            ["", "Log in", "Register", "Forgot Password"],
+#            format_func=lambda x: "Account" if x == "" else x,
+#            label_visibility="collapsed",
+#            key="account_action_app"
+#        )
 
 # --- Log in ---
-if account_action == "Log in":
-    with st.form("login_form"):
-        st.subheader("🔐 Log In")
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        remember = st.checkbox("Remember my account")
-        submit = st.form_submit_button("Log In")
+#if account_action == "Log in":
+#    with st.form("login_form"):
+#        st.subheader("🔐 Log In")
+#        username = st.text_input("Username")
+#        password = st.text_input("Password", type="password")
+#        remember = st.checkbox("Remember my account")
+#        submit = st.form_submit_button("Log In")
 
-        if submit:
-            user_id = verify_user_credentials(username, password)
-            if user_id:
-                st.session_state["auth_status"] = True
-                st.session_state["user_id"] = user_id
-                st.session_state["username"] = username
-                st.session_state["remember_me"] = remember
-                update_remember_me(user_id, remember)
+#        if submit:
+#            user_id = verify_user_credentials(username, password)
+#            if user_id:
+#                st.session_state["auth_status"] = True
+#                st.session_state["user_id"] = user_id
+#                st.session_state["username"] = username
+#                st.session_state["remember_me"] = remember
+#                update_remember_me(user_id, remember)
 
-                from utils.profile import load_user_profile
-                st.session_state["profile"] = load_user_profile(user_id)
+#                from utils.profile import load_user_profile
+#                st.session_state["profile"] = load_user_profile(user_id)
 
-                # ✅ Save session to file for persistence
-                with open(".login_session", "w") as f:
-                    f.write(f"{user_id}::{username}")
+#                # ✅ Save session to file for persistence
+#                with open(".login_session", "w") as f:
+#                    f.write(f"{user_id}::{username}")
 
-                st.success(f"Welcome back, {username}!")
-                st.rerun()
-            else:
-                st.error("Incorrect username or password.")
+#                st.success(f"Welcome back, {username}!")
+#                st.rerun()
+#            else:
+#                st.error("Incorrect username or password.")
 
 
 # --- Register ---
-elif account_action == "Register":
-    with st.form("register_form"):
-        st.subheader("📝 Register")
-        new_username = st.text_input("Username")
-        new_email = st.text_input("Email")
-        new_password = st.text_input("Password", type="password")
-        submit = st.form_submit_button("Register")
+#elif account_action == "Register":
+#    with st.form("register_form"):
+#        st.subheader("📝 Register")
+#        new_username = st.text_input("Username")
+#        new_email = st.text_input("Email")
+#        new_password = st.text_input("Password", type="password")
+#        submit = st.form_submit_button("Register")
 
-        if submit:
-            if register_user(new_username, new_email, new_password):
-                st.success("Registration successful! Please log in.")
-            else:
-                st.error("Username or email already exists.")
+#        if submit:
+#            if register_user(new_username, new_email, new_password):
+#               st.success("Registration successful! Please log in.")
+#            else:
+#                st.error("Username or email already exists.")
 
 # --- Forgot Password ---
-elif account_action == "Forgot Password":
-    with st.form("forgot_form"):
-        st.subheader("❓ Forgot Password")
-        email = st.text_input("Enter your registered email")
-        submit = st.form_submit_button("Send Reset Link")
+#elif account_action == "Forgot Password":
+#    with st.form("forgot_form"):
+#        st.subheader("❓ Forgot Password")
+#        email = st.text_input("Enter your registered email")
+#        submit = st.form_submit_button("Send Reset Link")
 
-        if submit:
-            if send_password_reset_email(email):
-                st.success("Reset link sent! Please check your inbox.")
-            else:
-                st.error("Email not found.")
+#        if submit:
+#            if send_password_reset_email(email):
+#                st.success("Reset link sent! Please check your inbox.")
+#            else:
+#                st.error("Email not found.")
 
 # --- Logout ---
-elif account_action == "Logout":
-    st.session_state["auth_status"] = False
-    st.session_state["user_id"] = None
-    st.session_state["username"] = None
-    st.session_state["remember_me"] = False
-    update_remember_me(None, False)
+#elif account_action == "Logout":
+#    st.session_state["auth_status"] = False
+#    st.session_state["user_id"] = None
+#    st.session_state["username"] = None
+#    st.session_state["remember_me"] = False
+#    update_remember_me(None, False)
 
     # ✅ Clear session file
-    if os.path.exists(".login_session"):
-        os.remove(".login_session")
+#    if os.path.exists(".login_session"):
+#        os.remove(".login_session")
 
-    st.success("You have been logged out.")
-    st.rerun()
+#    st.success("You have been logged out.")
+#    st.rerun()
 
 # --- Greeting ---
-if st.session_state["auth_status"]:
-    st.markdown(
-        f"<div style='position:fixed; top:10px; right:30px; z-index:999;'>"
-        f"<b>Welcome, {st.session_state['username']}!</b> "
-        f"</div>",
-        unsafe_allow_html=True
-    )
-else:
-    st.warning("🔒 Please log in to continue.")
+#if st.session_state["auth_status"]:
+#    st.markdown(
+#        f"<div style='position:fixed; top:10px; right:30px; z-index:999;'>"
+#       f"<b>Welcome, {st.session_state['username']}!</b> "
+#       f"</div>",
+#        unsafe_allow_html=True
+#    )
+#else:
+#    st.warning("🔒 Please log in to continue.")
 
 ####========================
 

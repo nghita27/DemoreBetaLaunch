@@ -17,129 +17,129 @@ face_designer_nav("Draw Face You Want")
 
 
 ##===========LOG IN
-from Security.auth_db import (
-    register_user,
-    verify_user_credentials,
-    send_password_reset_email,
-    update_remember_me
-)
+#from Security.auth_db import (
+#    register_user,
+#    verify_user_credentials,
+#    send_password_reset_email,
+#    update_remember_me
+#)
 
 # ========== UNIVERSAL LOGIN BLOCK ==========
-import streamlit as st
-import sqlite3
-import os
-from Security.auth_db import register_user, verify_user_credentials, send_password_reset_email
-from utils.profile import load_user_profile
+#import streamlit as st
+#import sqlite3
+#import os
+#from Security.auth_db import register_user, verify_user_credentials, send_password_reset_email
+#from utils.profile import load_user_profile
 
 # ==========================
 # SESSION-LOCAL LOGIN (No Global DB Auto-Login)
 # ==========================
-if "auth_status" not in st.session_state:
-    st.session_state["auth_status"] = False
-    st.session_state["user_id"] = None
-    st.session_state["username"] = None
-    st.session_state["remember_me"] = False
-    st.session_state["profile"] = {}
+#if "auth_status" not in st.session_state:
+#    st.session_state["auth_status"] = False
+#    st.session_state["user_id"] = None
+#    st.session_state["username"] = None
+#    st.session_state["remember_me"] = False
+#    st.session_state["profile"] = {}
 
 # === ACCOUNT SELECTOR (TOP-RIGHT) ===
-col1, col2 = st.columns([8, 1])
-with col2:
-    if st.session_state["auth_status"]:
-        account_action = st.selectbox(
-            "Account",
-            ["", "Logout"],
-            format_func=lambda x: "Account" if x == "" else x,
-            key="account_action_face_draw"
-        )
-    else:
-        account_action = st.selectbox(
-            "Account",
-            ["", "Log in", "Register", "Forgot Password"],
-            format_func=lambda x: "Account" if x == "" else x,
-            key="account_action_face_draw"
-        )
+#col1, col2 = st.columns([8, 1])
+#with col2:
+#    if st.session_state["auth_status"]:
+#        account_action = st.selectbox(
+#            "Account",
+#            ["", "Logout"],
+#            format_func=lambda x: "Account" if x == "" else x,
+#            key="account_action_face_draw"
+#        )
+#    else:
+#        account_action = st.selectbox(
+#            "Account",
+#            ["", "Log in", "Register", "Forgot Password"],
+#            format_func=lambda x: "Account" if x == "" else x,
+#            key="account_action_face_draw"
+#        )
 
 # === LOGIN LOGIC ===
-if account_action == "Log in":
-    with st.form("login_form_face_draw"):
-        st.subheader("Log In")
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        submit = st.form_submit_button("Log In")
+#if account_action == "Log in":
+#    with st.form("login_form_face_draw"):
+#        st.subheader("Log In")
+#        username = st.text_input("Username")
+#        password = st.text_input("Password", type="password")
+#        submit = st.form_submit_button("Log In")
 
-        if submit:
-            user_id = verify_user_credentials(username, password)
-            if user_id:
-                st.session_state["auth_status"] = True
-                st.session_state["user_id"] = user_id
-                st.session_state["username"] = username
+#        if submit:
+#            user_id = verify_user_credentials(username, password)
+#            if user_id:
+#                st.session_state["auth_status"] = True
+#                st.session_state["user_id"] = user_id
+#                st.session_state["username"] = username
 
-                # Load user profile for sketches
-                st.session_state["profile"] = load_user_profile(user_id)
+#                # Load user profile for sketches
+#                st.session_state["profile"] = load_user_profile(user_id)
 
-                st.success(f"Welcome back, {username}!")
-                st.rerun()
-            else:
-                st.error("Incorrect username or password.")
+#                st.success(f"Welcome back, {username}!")
+#                st.rerun()
+#            else:
+#                st.error("Incorrect username or password.")
 
-elif account_action == "Register":
-    with st.form("register_form_face_draw"):
-        st.subheader("📝 Register")
-        st.info("Please memorize your Username.")
-        new_username = st.text_input("Username")
-        new_email = st.text_input("Email")
-        new_password = st.text_input("Password", type="password")
-        submit = st.form_submit_button("Register")
+#elif account_action == "Register":
+#    with st.form("register_form_face_draw"):
+#        st.subheader("📝 Register")
+#        st.info("Please memorize your Username.")
+#        new_username = st.text_input("Username")
+#        new_email = st.text_input("Email")
+#        new_password = st.text_input("Password", type="password")
+#        submit = st.form_submit_button("Register")
 
-        if submit:
-            conn = sqlite3.connect("portfolio.db")
-            c = conn.cursor()
+#        if submit:
+#            conn = sqlite3.connect("portfolio.db")
+#            c = conn.cursor()
 
-            # Check email
-            c.execute("SELECT 1 FROM users WHERE email = ?", (new_email,))
-            email_exists = c.fetchone() is not None
+#            # Check email
+#            c.execute("SELECT 1 FROM users WHERE email = ?", (new_email,))
+#            email_exists = c.fetchone() is not None
 
-            # Check username
-            c.execute("SELECT 1 FROM users WHERE username = ?", (new_username,))
-            username_exists = c.fetchone() is not None
+#            # Check username
+#            c.execute("SELECT 1 FROM users WHERE username = ?", (new_username,))
+#            username_exists = c.fetchone() is not None
 
-            if email_exists:
-                st.error("❌ This email is already registered.")
-                st.info("💡 You can use 'Forgot Password' to reset your password.")
-            elif username_exists:
-                st.error("❌ Username is already taken.")
-            else:
-                if register_user(new_username, new_email, new_password):
-                    st.success("✅ Registration successful! Please log in.")
-                else:
-                    st.error("❌ Registration failed. Please try again later.")
-            conn.close()
+#            if email_exists:
+#                st.error("❌ This email is already registered.")
+#                st.info("💡 You can use 'Forgot Password' to reset your password.")
+#            elif username_exists:
+#                st.error("❌ Username is already taken.")
+#            else:
+#                if register_user(new_username, new_email, new_password):
+#                    st.success("✅ Registration successful! Please log in.")
+#                else:
+#                    st.error("❌ Registration failed. Please try again later.")
+#            conn.close()
 
-elif account_action == "Forgot Password":
-    with st.form("forgot_form_face_draw"):
-        st.subheader("Forgot Password")
-        email = st.text_input("Enter your registered email")
-        submit = st.form_submit_button("Send Reset Link")
+#elif account_action == "Forgot Password":
+#    with st.form("forgot_form_face_draw"):
+#        st.subheader("Forgot Password")
+#        email = st.text_input("Enter your registered email")
+#        submit = st.form_submit_button("Send Reset Link")
 
-        if submit:
-            if send_password_reset_email(email):
-                st.success("Reset link sent! Please check your inbox.")
-            else:
-                st.error("Email not found.")
+#        if submit:
+#            if send_password_reset_email(email):
+#                st.success("Reset link sent! Please check your inbox.")
+#            else:
+#                st.error("Email not found.")
 
-elif account_action == "Logout":
-    st.session_state["auth_status"] = False
-    st.session_state["user_id"] = None
-    st.session_state["username"] = None
-    st.session_state["profile"] = {}
-    st.success("Logged out successfully.")
-    st.rerun()
+#elif account_action == "Logout":
+#    st.session_state["auth_status"] = False
+#    st.session_state["user_id"] = None
+#    st.session_state["username"] = None
+#    st.session_state["profile"] = {}
+#    st.success("Logged out successfully.")
+#    st.rerun()
 
 # === SHOW LOGIN STATUS ===
-if st.session_state["auth_status"]:
-    st.markdown(f"<div style='text-align:right;'>👋 Welcome, <b>{st.session_state['username']}</b></div>", unsafe_allow_html=True)
-else:
-    st.info("You're viewing as a guest. Log in to save your face sketches.")
+#if st.session_state["auth_status"]:
+#    st.markdown(f"<div style='text-align:right;'>👋 Welcome, <b>{st.session_state['username']}</b></div>", unsafe_allow_html=True)
+#else:
+#    st.info("You're viewing as a guest. Log in to save your face sketches.")
 
 ####========================
 
@@ -669,110 +669,3 @@ if st.session_state.landmarks is not None and st.session_state.drawn_img is not 
 
 
 
-# ========== AUTH CHECK ==========
-# === PROTECTED CONTENT ===
-from Security.face_sketch_db import save_face_sketch, load_user_sketches
-
-UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "sketch_uploads")
-
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-if not st.session_state["auth_status"]:
-    st.warning("🔒 Please log in to access this page.")
-    st.stop()
-
-if not st.session_state["auth_status"]:
-    st.title("🔐 Login to Your Face Designer Studio")
-
-    username = st.text_input("Username", key="face_login_username")
-    password = st.text_input("Password", type="password", key="face_login_password")
-
-    if st.button("Log In", key="face_login_button"):
-        if verify_user_credentials(username, password):
-            st.session_state["auth_status"] = True
-            st.session_state["username"] = username
-            st.session_state["user_id"] = username  # or fetch actual user_id from DB if different
-            st.success("✅ Logged in successfully!")
-            st.rerun()
-        else:
-            st.error("❌ Invalid credentials. Please try again.")
-
-    st.stop()
-
-
-user_id = st.session_state["user_id"]
-username = st.session_state["username"]
-# ========== SAVE SKETCH FORM ==========
-with st.container():
-    st.markdown('<div class="gray-box">', unsafe_allow_html=True)
-    st.subheader("Save Your Sketch")
-
-    with st.form("save_sketch_form_main", clear_on_submit=True):
-        uploaded_file = st.file_uploader("Upload a finished sketch (PNG or JPG)", type=["png", "jpg", "jpeg"])
-        sketch_name = st.text_input("Sketch Name")
-        category = st.text_input("Enter a category (e.g., Bridal, Glam, Editorial)")
-        submit = st.form_submit_button("Save Sketch")
-
-        if submit:
-            if uploaded_file and sketch_name:
-                image_bytes = uploaded_file.read()
-                save_face_sketch(user_id, image_bytes, metadata=sketch_name, category=category)
-                st.success("Sketch saved successfully!")
-                st.rerun()
-            else:
-                st.warning("Please upload a sketch and enter a name.")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# ========== LOAD SAVED SKETCHES ==========
-
-all_sketches = load_user_sketches(user_id)
-if all_sketches:
-    with st.container():
-        st.markdown('<div class="gray-box">', unsafe_allow_html=True)
-        st.markdown("### My Saved Sketches")
-
-        all_categories = sorted(set(cat for _, _, _, cat in all_sketches if cat))
-        selected_filter = st.selectbox("🔍 View by Category", ["All"] + all_categories)
-
-        sketches = all_sketches if selected_filter == "All" else [
-            s for s in all_sketches if s[3] == selected_filter
-        ]
-
-        cols = st.columns(4)
-        for idx, (sketch_id, image_data, metadata, category) in enumerate(sketches):
-            col = cols[idx % 4]
-            with col:
-                try:
-                    image = Image.open(io.BytesIO(image_data))
-                except Exception:
-                    try:
-                        if isinstance(image_data, str) and os.path.exists(image_data):
-                            with open(image_data, "rb") as f:
-                                image_bytes = f.read()
-                            image = Image.open(io.BytesIO(image_bytes))
-                            save_face_sketch(user_id, image_bytes, metadata, category)
-                            delete_sketch(sketch_id)
-                            continue
-                        else:
-                            delete_sketch(sketch_id)
-                            continue
-                    except Exception:
-                        delete_sketch(sketch_id)
-                        continue
-
-                if image:
-                    st.image(image, use_container_width=True)
-                    st.markdown(f"**{metadata or 'Untitled'}**")
-                    st.caption(f"📁 {category or 'Uncategorized'}")
-
-                    # Right-aligned delete button below the image
-                    unique_key = f"delete_{sketch_id}"
-                    delete_col = st.columns([0.85, 0.15])[1]
-                    with delete_col:
-                        if st.button("❌", key=unique_key):
-                            delete_sketch(sketch_id)
-                            st.success("Sketch deleted.")
-                            st.rerun()
-
-        st.markdown('</div>', unsafe_allow_html=True)
-else:
-    st.info("You haven't saved any sketches yet.")

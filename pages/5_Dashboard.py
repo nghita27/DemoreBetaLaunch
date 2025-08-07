@@ -26,12 +26,23 @@ import pytz
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 
+import streamlit as st
+import os
+import sqlite3
+from utils.profile import load_user_profile  # assuming this is a safe call
 
+# Database path (unchanged)
+DB_PATH = os.path.join(os.path.dirname(__file__), "..", "portfolio.db")
+
+# --- Use ABSOLUTE path for the login session file ---
+SESSION_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), ".login_session"))
+
+# --- Persistent Session Setup ---
 #========LOG IN/REGISTER
 # === UNIVERSAL LOGIN/LOGOUT HELPER ===
 
 # === TOP OF PAGE ===
-# === TOP OF PAGE ===
+
 import streamlit as st
 import sqlite3
 from Security.auth_db import (
@@ -48,47 +59,46 @@ DB_PATH = "portfolio.db"
 UPLOADS_DIR = "uploads"
 
 # --- Session Init ---
-# Session initialization (no global DB auto-login)
-import streamlit as st
-import sqlite3
-import os
-from Security.auth_db import register_user, verify_user_credentials, send_password_reset_email
-from utils.profile import load_user_profile
-
-# ==========================
-# SESSION-LOCAL LOGIN (No Global DB Auto-Login)
-# ==========================
 if "auth_status" not in st.session_state:
-    st.session_state["auth_status"] = False
-    st.session_state["user_id"] = None
-    st.session_state["username"] = None
-    st.session_state["remember_me"] = False
-    st.session_state["profile"] = {}
+    st.session_state.auth_status = False
+    st.session_state.username = None
+    st.session_state.user_id = None
+    st.session_state.remember_me = False
 
-# === ACCOUNT SELECTOR (TOP-RIGHT) ===
+    # Check DB for remembered user
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT id, username FROM users WHERE remember_me=1 LIMIT 1")
+    row = c.fetchone()
+    conn.close()
+    if row:
+        st.session_state.auth_status = True
+        st.session_state.user_id = row[0]
+        st.session_state.username = row[1]
+        st.session_state.remember_me = True
+
+# --- Top Right Dropdown ---
 col1, col2 = st.columns([8, 1])
 with col2:
-    if st.session_state["auth_status"]:
+    if st.session_state.auth_status:
         account_action = st.selectbox(
-            "Account",
-            ["", "Logout"],
-            format_func=lambda x: "Account" if x == "" else x,
-            key="account_action_face_draw"
+            "Account", ["", "Logout"], format_func=lambda x: "Account" if x == "" else x,
+            label_visibility="collapsed", key="acc_action"
         )
     else:
         account_action = st.selectbox(
-            "Account",
-            ["", "Log in", "Register", "Forgot Password"],
+            "Account", ["", "Log in", "Register", "Forgot Password"],
             format_func=lambda x: "Account" if x == "" else x,
-            key="account_action_face_draw"
+            label_visibility="collapsed", key="acc_action"
         )
 
-# === LOGIN LOGIC ===
+# --- Auth Logic ---
 if account_action == "Log in":
-    with st.form("login_form_face_draw"):
+    with st.form("login_form_face"):
         st.subheader("Log In")
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
+        remember = st.checkbox("Remember me")
         submit = st.form_submit_button("Log In")
 
         if submit:
@@ -97,8 +107,10 @@ if account_action == "Log in":
                 st.session_state["auth_status"] = True
                 st.session_state["user_id"] = user_id
                 st.session_state["username"] = username
+                st.session_state["remember_me"] = remember
+                update_remember_me(user_id, remember)
 
-                # Load user profile for sketches
+                from utils.profile import load_user_profile
                 st.session_state["profile"] = load_user_profile(user_id)
 
                 st.success(f"Welcome back, {username}!")
@@ -106,64 +118,51 @@ if account_action == "Log in":
             else:
                 st.error("Incorrect username or password.")
 
+
+
+
 elif account_action == "Register":
-    with st.form("register_form_face_draw"):
-        st.subheader("📝 Register")
-        st.info("Please memorize your Username.")
-        new_username = st.text_input("Username")
+    with st.form("register_form"):
+        st.subheader("Register")
+        new_username = st.text_input("New Username")
         new_email = st.text_input("Email")
-        new_password = st.text_input("Password", type="password")
-        submit = st.form_submit_button("Register")
-
-        if submit:
-            conn = sqlite3.connect("portfolio.db")
-            c = conn.cursor()
-
-            # Check email
-            c.execute("SELECT 1 FROM users WHERE email = ?", (new_email,))
-            email_exists = c.fetchone() is not None
-
-            # Check username
-            c.execute("SELECT 1 FROM users WHERE username = ?", (new_username,))
-            username_exists = c.fetchone() is not None
-
-            if email_exists:
-                st.error("❌ This email is already registered.")
-                st.info("💡 You can use 'Forgot Password' to reset your password.")
-            elif username_exists:
-                st.error("❌ Username is already taken.")
+        new_password = st.text_input("New Password", type="password")
+        register_submit = st.form_submit_button("Register")
+        if register_submit:
+            if register_user(new_username, new_email, new_password):
+                st.success("✅ Registration successful! Please log in.")
             else:
-                if register_user(new_username, new_email, new_password):
-                    st.success("✅ Registration successful! Please log in.")
-                else:
-                    st.error("❌ Registration failed. Please try again later.")
-            conn.close()
+                st.error("x Username or email already exists.")
 
 elif account_action == "Forgot Password":
-    with st.form("forgot_form_face_draw"):
+    with st.form("forgot_pw_form"):
         st.subheader("Forgot Password")
         email = st.text_input("Enter your registered email")
-        submit = st.form_submit_button("Send Reset Link")
-
-        if submit:
+        reset_submit = st.form_submit_button("Send Reset Link")
+        if reset_submit:
             if send_password_reset_email(email):
-                st.success("Reset link sent! Please check your inbox.")
+                st.success("✅ Reset link sent.")
             else:
-                st.error("Email not found.")
+                st.error("x Email not found.")
 
 elif account_action == "Logout":
+    update_remember_me(st.session_state.get("user_id"), False)
     st.session_state["auth_status"] = False
     st.session_state["user_id"] = None
     st.session_state["username"] = None
+    st.session_state["remember_me"] = False
     st.session_state["profile"] = {}
-    st.success("Logged out successfully.")
+    st.success("Logged out.")
     st.rerun()
 
-# === SHOW LOGIN STATUS ===
+# --- SHOW LOGIN STATUS ---
 if st.session_state["auth_status"]:
-    st.markdown(f"<div style='text-align:right;'>👋 Welcome, <b>{st.session_state['username']}</b></div>", unsafe_allow_html=True)
-else:
-    st.info("You're viewing as a guest. Log in to save your face sketches.")
+    st.markdown(
+        f"<div style='text-align:right;'>👋 Welcome, <b>{st.session_state['username']}</b></div>", 
+        unsafe_allow_html=True
+    )
+#else:
+#    st.markdown("You're viewing as a guest. Please log in to save your portfolio.")
 
 
 ####========================
@@ -230,8 +229,13 @@ def get_link_preview(link):
 
 
 def show_my_dashboard():
+    st.warning(
+    "This is a beta version. For your security, please LOG OUT before sharing the app link. "
+    "Thank you for your understanding!"
+)
     st.title("My Dashboard")
     st.markdown("Welcome to your personal dashboard!")
+    
 
 def show_public_profile(artist_id):
     st.markdown(f"## Viewing public profile of artist: {artist_id}")
@@ -1194,7 +1198,7 @@ import streamlit as st
 
 user_id = st.session_state.get("user_id")
 if user_id is None:
-    st.warning("Please log in to continue.")
+    st.markdown("Please log in to share your portfolio.")
     st.stop()
 
 # Ensure profile exists for this user (function assumed to create if missing)
@@ -1486,7 +1490,7 @@ if tab == "Dashboard":
 
         # --- Portfolio Upload Section ---
         st.markdown("## Portfolio: Upload Photos")
-        st.info("Please check your 'Name' on sidebar before posting images")
+        st.warning("Please check your 'Name' on sidebar before posting images")
         upload_type = st.radio(
             "Choose upload type:",
             [
